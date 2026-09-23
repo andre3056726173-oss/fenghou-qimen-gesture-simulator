@@ -23,16 +23,12 @@ import { GestureTuningPanel } from './ui/GestureTuningPanel';
 import { InteractionEventTimeline } from './ui/InteractionEventTimeline';
 import { SpellDemoDirector } from './showcase/SpellDemoDirector';
 import { FrameSampleGate } from './handTracking/FrameSampleGate';
-import { setCameraDimensions } from './handTracking/CameraCoordinates';
 import { StateInvariantGuard } from './StateInvariantGuard';
 import type { SpellControllerEvent } from './spells/SpellCastController';
 import type { SpellAction } from './spells/SpellContext';
 import type { GestureSnapshot, TrackingFrame } from './types';
-
-// 真实手势模式默认开启；?demo=1 仍可进入上一轮的纯阵局演示。
-export const DEMO_MODE = false;
-export const SPELL_DEMO_MODE = false;
-export const REAL_QA_MODE = false;
+import { CameraSession } from './app/CameraSession';
+import { readRuntimeMode, DEMO_MODE } from './app/runtimeMode';
 
 const root = document.querySelector<HTMLElement>('#scene-root')!;
 const video = document.querySelector<HTMLVideoElement>('#camera')!;
@@ -68,7 +64,6 @@ const invariantGuard = new StateInvariantGuard();
 const appEvents = new AbortController();
 let disposed = false;
 let animationFrame = 0;
-let cameraRequest = 0;
 let lastActionSampleAt = 0;
 let lastPrimaryHand: string | null = null;
 let cachedSnapshot = recognizer.update({ hands: [], timestamp: 0, fps: 0 });
@@ -80,25 +75,20 @@ qimen.formation.setSnapDamping(tuning.values.snapDamping);
 let demoMode = DEMO_MODE;
 let selectedSector: number | null = null;
 let latestFps = 0;
-let cameraStream: MediaStream | null = null;
-let activeCameraLabel = '未选择';
-let activeCameraId = '';
-let detectedCameras: MediaDeviceInfo[] = [];
 let previousHoveredPlate: number | null = null;
 let previousFocusedSector: number | null = null;
 let previousSpellStage = qimen.spellSystem.stage;
 let ignoreFistCollapseUntilRelease = false;
 let lastCalibrationInstruction = '';
 let currentInteractionTimestamp = 0;
-let spellReadyAt = 0;
 let handWasMissing = false;
-const previewParams = new URLSearchParams(window.location.search);
-const showcaseMode = previewParams.get('showcase') === '1';
-const showcaseCameraBackground = showcaseMode && previewParams.get('background') === 'camera';
-const spellDemoMode = SPELL_DEMO_MODE || previewParams.get('spellDemo') === '1';
-const presentationDemoMode = spellDemoMode || showcaseMode;
-const realQaMode = REAL_QA_MODE || previewParams.get('qa') === '1';
-const cameraDebugMode = previewParams.get('cameraDebug') === '1';
+const mode = readRuntimeMode();
+const showcaseMode = mode.showcase;
+const showcaseCameraBackground = mode.showcaseCameraBackground;
+const presentationDemoMode = mode.presentationDemo;
+const realQaMode = mode.realQa;
+const cameraDebugMode = mode.cameraDebug;
+const camera = new CameraSession(video, appEvents.signal, () => disposed);
 if (cameraDebugMode) document.body.classList.add('camera-debug');
 if (showcaseMode) {
   document.body.classList.add('showcase-mode');
@@ -113,19 +103,11 @@ function activateExperience(message: string) {
   if (message) hud.toast(message);
 }
 
-const excludedCameraPattern = /redmi|virtual|nvidia|broadcast|obs|capture|screen|phone/i;
-
-function setText(id: string, value: string) {
-  const element = document.querySelector<HTMLElement>(`#${id}`);
-  if (element) element.textContent = value;
-}
-
 function emitSpellEvents(events: SpellControllerEvent[]) {
   events.forEach((event) => {
     if (event.type === 'stage') {
       if (debug.enabled) timeline.push(currentInteractionTimestamp, `${event.stage}${event.spell ? ` ${event.spell.id}` : ''}`);
       if (!demoMode && event.stage === 'PREPARING' && event.spell) qa.attempt(event.spell.id);
-      if (event.stage === 'READY') spellReadyAt = currentInteractionTimestamp;
       if (event.stage === 'PREPARING' && previousSpellStage !== 'PREPARING') audioBus.emit('spell_prepare');
       if (event.stage === 'READY' && previousSpellStage !== 'READY') audioBus.emit('spell_ready');
       previousSpellStage = event.stage;
@@ -151,42 +133,6 @@ const spellDemoDirector = new SpellDemoDirector(qimen, {
   cue: (label) => hud.toast(label),
 });
 
-function updateCameraDiagnostics() {
-  const track = cameraStream?.getVideoTracks()[0];
-  const settings = track?.getSettings();
-  const resolution = video.videoWidth > 0 ? `${video.videoWidth} × ${video.videoHeight}` : '—';
-  setText('debug-camera-count', String(detectedCameras.length));
-  setText('debug-camera-active', activeCameraLabel);
-  setText('debug-camera-id', activeCameraId ? `${activeCameraId.slice(0, 12)}…` : '—');
-  setText('debug-camera-resolution', resolution);
-  setText('debug-camera-fps', settings?.frameRate ? `${Math.round(settings.frameRate)}` : '—');
-  setText('debug-camera-mirror', 'ON');
-  setText('debug-input-size', resolution);
-  setText('camera-debug-label', activeCameraLabel);
-  setText('camera-debug-resolution', resolution);
-  setText('camera-debug-ready', String(video.readyState));
-  setText('camera-debug-id', activeCameraId ? `${activeCameraId.slice(0, 12)}…` : '—');
-}
-
-async function waitForVideoMetadata() {
-  if (video.readyState >= HTMLMediaElement.HAVE_METADATA && video.videoWidth > 0) return;
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => { window.clearTimeout(timeout); video.removeEventListener('loadedmetadata', onLoaded); appEvents.signal.removeEventListener('abort', onAbort); };
-    const onLoaded = () => { cleanup(); resolve(); };
-    const onAbort = () => { cleanup(); reject(new DOMException('Camera request cancelled', 'AbortError')); };
-    const timeout = window.setTimeout(() => { cleanup(); reject(new Error('摄像头视频元数据超时')); }, 7000);
-    video.addEventListener('loadedmetadata', onLoaded, { once: true });
-    appEvents.signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function stopCamera() {
-  cameraRequest += 1;
-  cameraStream?.getTracks().forEach((track) => track.stop());
-  cameraStream = null;
-  video.srcObject = null;
-}
-
 function resetInteractionRuntime() {
   stateMachine.reset(); smoother.reset(); recognizer.reset(); motionDetector.reset(); rotationController.reset();
   choreography.reset(); sectorFocus.reset(); inputBuffer.clear(); sampleGate.reset();
@@ -199,82 +145,17 @@ function resetInteractionRuntime() {
   cachedRotation = rotationController.update(undefined, 0);
 }
 
-function checkCameraRequest(id: number, stream?: MediaStream) {
-  if (disposed || id !== cameraRequest) {
-    stream?.getTracks().forEach((track) => track.stop());
-    throw new DOMException('Camera request cancelled', 'AbortError');
-  }
-}
-
-async function startFixedRGBCamera(requestId: number) {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头访问');
-  cameraStream?.getTracks().forEach((track) => track.stop());
-  cameraStream = null;
-
-  // 先请求一次权限，浏览器才会返回可用的真实设备名称。
-  const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  try {
-    checkCameraRequest(requestId, permissionStream);
-    detectedCameras = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'videoinput');
-  } finally { permissionStream.getTracks().forEach((track) => track.stop()); }
-  checkCameraRequest(requestId);
-  console.table(detectedCameras.map((camera) => ({ label: camera.label, deviceId: camera.deviceId.slice(0, 12) })));
-
-  const usbWebcam = detectedCameras.find((camera) => /usb webcam/i.test(camera.label) && !excludedCameraPattern.test(camera.label));
-  const targetCamera = usbWebcam ?? detectedCameras.find((camera) => !excludedCameraPattern.test(camera.label));
-  permissionStream.getTracks().forEach((track) => track.stop());
-  if (!targetCamera) throw new Error('未找到可用的实体 RGB 摄像头（已排除虚拟/红外设备）');
-
-  const request = (width: number, height: number) => navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: targetCamera ? {
-      deviceId: { exact: targetCamera.deviceId },
-      width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: 30, max: 30 },
-    } : { width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: 30, max: 30 } },
-  });
-
-  let openedStream: MediaStream;
-  try {
-    openedStream = await request(1280, 720);
-  } catch (error) {
-    checkCameraRequest(requestId);
-    console.warn('1280×720 camera request failed; falling back to 640×480', error);
-    openedStream = await request(640, 480);
-  }
-  checkCameraRequest(requestId, openedStream);
-  cameraStream = openedStream;
-
-  video.srcObject = cameraStream;
-  video.autoplay = true;
-  video.muted = true;
-  video.playsInline = true;
-  await video.play();
-  checkCameraRequest(requestId, openedStream);
-  await waitForVideoMetadata();
-  checkCameraRequest(requestId, openedStream);
-  if (video.videoWidth <= 0 || video.videoHeight <= 0) throw new Error('摄像头返回了空视频尺寸');
-  setCameraDimensions(video.videoWidth, video.videoHeight);
-
-  const track = cameraStream.getVideoTracks()[0];
-  activeCameraId = track?.getSettings().deviceId ?? targetCamera?.deviceId ?? '';
-  activeCameraLabel = targetCamera?.label || track?.label || '未命名摄像头';
-  console.info('Using camera:', activeCameraLabel);
-  console.info('Video:', `${video.videoWidth} x ${video.videoHeight}`);
-  console.info('ReadyState:', video.readyState);
-  updateCameraDiagnostics();
-  tracker.setVideoSource(video);
-}
-
 async function startCamera(preserveDemo = false) {
   if (disposed || cameraButton.disabled) return;
-  stopCamera();
-  const requestId = cameraRequest;
+  camera.stop();
+  const requestId = camera.currentRequest;
   cameraButton.disabled = true;
   cameraButton.textContent = '正在启阵…';
   try {
-    await startFixedRGBCamera(requestId);
+    await camera.open(requestId);
+    tracker.setVideoSource(video);
     if (!preserveDemo) await tracker.initialize((status: TrackerStatus, message: string) => hud.setTrackerStatus(status, message));
-    checkCameraRequest(requestId);
+    camera.assertCurrent(requestId);
     resetInteractionRuntime();
     qimen.setPresentationCamera(preserveDemo);
     demoMode = preserveDemo;
@@ -285,8 +166,8 @@ async function startCamera(preserveDemo = false) {
     activateExperience(preserveDemo ? '展示模式 · 摄像头背景已就绪' : '摄像头已就绪 · 张开手掌召唤阵法');
     if (!preserveDemo) hud.toast('摄像头已固定 · 请确认镜头中能看到双手');
   } catch (error) {
-    if (disposed || requestId !== cameraRequest) return;
-    cameraStream?.getTracks().forEach((track) => track.stop()); cameraStream = null; video.srcObject = null;
+    if (disposed || requestId !== camera.currentRequest) return;
+    camera.release();
     console.error(error);
     hud.setTrackerStatus(tracker.status, tracker.status === 'denied' ? '权限被拒 · 可用演示' : '模型载入失败 · 可用演示');
     if (preserveDemo) spellDemoDirector.start();
@@ -299,7 +180,7 @@ async function startCamera(preserveDemo = false) {
 
 cameraButton.addEventListener('click', () => { void startCamera(); }, { signal: appEvents.signal });
 demoButton.addEventListener('click', () => {
-  stopCamera();
+  camera.stop();
   resetInteractionRuntime();
   qimen.setPresentationCamera(true);
   demoMode = true;
@@ -514,8 +395,8 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   emitSpellEvents(spellEvents);
   if (freshSample) recorder.record(snapshot, spellMotion, qimen.spellSystem.stage, qimen.spellSystem.lockedSector, sampleTimestamp);
   if (qa.session) qa.setEnvironment({
-    camera: activeCameraLabel,
-    cameraFps: cameraStream?.getVideoTracks()[0]?.getSettings().frameRate ?? null,
+    camera: camera.label,
+    cameraFps: camera.frameRate,
     handTrackingFps: latestFps,
     renderFps: qimen.renderFps,
     detectedHands: snapshot.handCount,
@@ -542,7 +423,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   });
   const renderStats = qimen.getPerformanceDebug();
   debug.updateQa(debug.enabled ? [
-    `QA Camera ${cameraStream ? 'ON' : 'OFF'} · Hand ${latestFps.toFixed(0)}fps · Render ${qimen.renderFps.toFixed(0)}fps/${qimen.performanceTier}`,
+    `QA Camera ${camera.active ? 'ON' : 'OFF'} · Hand ${latestFps.toFixed(0)}fps · Render ${qimen.renderFps.toFixed(0)}fps/${qimen.performanceTier}`,
     `Hands ${snapshot.handCount} · Dominant ${dominantHand.preferred} · Gesture ${snapshot.name} · Intent ${spellMotion.action ?? '—'}`,
     `Choreo ${choreography.stage} · GestureState ${stateMachine.state} · Hover ${hoveredPlate ?? '—'} · Focus ${focusState.sector ?? '—'} · Selected ${selectedSector ?? '—'}`,
     `Scores O:${snapshot.openPalm ? '1.00' : '0.00'} F:${snapshot.fist ? '1.00' : '0.00'} P:${snapshot.pointing ? '1.00' : '0.00'} Pin:${Math.max(0, 1 - snapshot.normalizedPinchDistance / 0.25).toFixed(2)}`,
@@ -553,7 +434,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     ...timeline.lines(timestamp),
   ] : []);
   hud.update(snapshot, latestFps);
-  updateCameraDiagnostics();
+  camera.updateDiagnostics();
 }
 
 function loop(timestamp: number) {
@@ -605,7 +486,7 @@ function disposeApp() {
   if (disposed) return;
   disposed = true;
   cancelAnimationFrame(animationFrame);
-  appEvents.abort(); stopCamera(); tracker.dispose(); qimen.dispose(); debug.dispose(); tuningPanel.dispose(); hud.dispose(); audioBus.dispose(); unsubscribeTuning();
+  appEvents.abort(); camera.stop(); tracker.dispose(); qimen.dispose(); debug.dispose(); tuningPanel.dispose(); hud.dispose(); audioBus.dispose(); unsubscribeTuning();
 }
 window.addEventListener('pagehide', (event) => { if (!event.persisted) disposeApp(); }, { signal: appEvents.signal });
 import.meta.hot?.dispose(disposeApp);
@@ -616,5 +497,5 @@ if (presentationDemoMode) {
   activateExperience('术式演示 · 坤巽震坎');
   spellDemoDirector.start();
   if (showcaseCameraBackground) void startCamera(true);
-} else if (previewParams.get('demo') === '1' || window.location.pathname === '/demo') demoButton.click();
-if (cameraDebugMode || (!presentationDemoMode && previewParams.get('demo') !== '1' && window.location.pathname !== '/demo')) void startCamera();
+} else if (mode.formationDemo) demoButton.click();
+if (cameraDebugMode || (!presentationDemoMode && !mode.formationDemo)) void startCamera();
