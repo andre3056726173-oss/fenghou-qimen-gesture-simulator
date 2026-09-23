@@ -2,26 +2,20 @@
 
 A real-time gesture-controlled Qimen formation experiment built with MediaPipe, Three.js and WebGL.
 
-通过电脑摄像头识别手部动作，在浏览器中召唤、拨动并操纵一个正面悬浮的原创程序化奇门圆阵。这是正在开发的交互实验，真人准确率尚未验收。摄像头画面由浏览器本地交给 MediaPipe 处理；本项目代码不上传视频帧。关于 MediaPipe SDK 自身的数据处理，请参阅其[官方隐私说明](https://github.com/google-ai-edge/mediapipe#privacy-notice)。
+对着电脑摄像头比手势，在浏览器里召唤、拨动一个悬浮的奇门阵盘，并按宫位发动四种术式。
 
-## 当前功能 / Features
+> 这是开发中的交互实验。手势识别还没有经过真人摄像头的系统验收，识别效果会受光照、摄像头和手的位置影响。
 
-- 双手实时识别；单手张掌召阵、握拳收阵。
-- `FRONT_CIRCLE` 悬浮四盘；盘层 Hover、捏合抓取、转腕、惯性与 45° 吸附。
-- 八宫 Preview / Focus / Lock；双手缩放、抓取空间位置与盘层分离。
-- 四种实验术式：坤·土、巽·风、震·雷、坎·水。术式由定宫和后续动作触发。
-- 可选个人手势校准、数值录制、真人 QA 记录、性能档位与 Debug 面板。
-- 纯阵局、四术自动演示和无界面 Showcase 模式。
+## 没有摄像头？先看演示
 
-当前手部遮挡接口尚未接入真实分割；实际识别率、延迟和五分钟 GPU 稳定性仍需真人摄像头验收。详见 [Roadmap](ROADMAP.md) 与 [架构审计](docs/ARCHITECTURE_AUDIT.md)。
+装好之后（见下一节），打开这两个地址不需要摄像头：
 
-## 技术栈 / Stack
+- `http://localhost:5173/?spellDemo=1`：自动演示坤、巽、震、坎四种术式
+- `http://localhost:5173/?demo=1`：只看阵盘动画
 
-TypeScript、[Three.js](https://threejs.org/) `0.186.0`、[@mediapipe/tasks-vision](https://www.npmjs.com/package/@mediapipe/tasks-vision) `1.0.1`、WebGL、Vite `8.3.0`。依赖版本锁定在 `package-lock.json`；没有账号、API Key 或环境变量要求。
+## 安装与运行 / Quick start
 
-## 快速开始 / Quick start
-
-需要 Node.js `^20.19.0` 或 `>=22.12.0`、npm 和首次安装时的网络连接。
+需要 Node.js `^20.19.0` 或 `>=22.12.0`。
 
 ```bash
 git clone https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
@@ -30,9 +24,52 @@ npm install
 npm run dev
 ```
 
-打开终端显示的本地地址。首次 `npm install` 会把 MediaPipe WASM 从 npm 包复制到 `public/mediapipe/wasm/`，并从 Google 官方地址下载约 7.5 MB 的 Hand Landmarker 模型到 `public/mediapipe/models/`。这些生成文件不提交到 Git；以后启动使用本地副本。下载失败时检查网络连接，然后重新运行 `npm install`。
+打开终端里显示的地址（默认 `http://localhost:5173`），允许浏览器使用摄像头。推荐 Chrome 或 Edge。
 
-构建和验证：
+首次 `npm install` 会从 Google 官方地址下载约 7.5 MB 的手部识别模型，之后都用本地副本。下载失败时检查网络，再运行一次 `npm install`。
+
+## 怎么玩 / Controls
+
+一只手就能走完一轮：**张掌召阵 → 指向一个宫位 → 捏合定宫 → 等蓄势完成 → 做对应动作施术 → 握拳收阵**。
+
+| 手势 | 作用 |
+|---|---|
+| 张开手掌 | 召唤阵盘 |
+| 握拳 | 短握：取消准备中的术式；长握：收起阵盘 |
+| 只伸食指指向 | 选择宫位 |
+| 拇指食指捏合 | 指向宫位时：锁定宫位；否则：抓住一层盘，转手腕来拨动 |
+| 双手同时捏合 | 移动整个阵盘 |
+| 双手张开并拉开距离 | 放大阵盘，拉得更远会让四层盘分开 |
+
+锁定宫位后，等术式蓄势完成，再做对应动作：
+
+| 宫位 | 术式 | 发动动作 |
+|---|---|---|
+| 坤 | 土 | 手掌往前轻推 |
+| 巽 | 风 | 手掌左右横扫 |
+| 震 | 雷 | 捏合保持一下再快速张开手指 |
+| 坎 | 水 | 手掌往身体方向回拉 |
+
+每个手势都要保持稳定一小会儿才会被认出来。更细的说明见 [手势文档](docs/GESTURES.md)。
+
+## 常见问题 / FAQ
+
+**找不到摄像头？** 程序会自动排除名字里带 `virtual`、`obs`、`capture`、`screen`、`phone`、`redmi`、`nvidia`、`broadcast` 的设备（虚拟摄像头、手机摄像头之类），并优先使用名字里带 `USB Webcam` 的设备。如果你只有这类摄像头，目前会提示「未找到可用的实体 RGB 摄像头」。
+
+**隐私：** 摄像头画面只在本机浏览器里交给 MediaPipe 识别，本项目不上传视频。MediaPipe 自身的数据处理见其 [官方隐私说明](https://github.com/google-ai-edge/mediapipe#privacy-notice)。
+
+## 调试 / Debug
+
+- `?showcase=1`：隐藏所有界面的纯展示；加上 `&background=camera` 会用摄像头画面当背景（不识别手势）。
+- 摄像头模式下加 `?qa=1`，按 `D` 打开调试面板：
+  - `C`：个人手势校准，结果保存在当前浏览器
+  - `R`：录制最长 10 秒的手势数值（JSON）
+  - `T`：开始/结束最长 60 秒的 QA 记录（JSON）
+  - `1`–`4`：模拟施术，只用来看视觉效果，不代表手势能被识别
+
+导出的 JSON 不含视频，但可能有设备信息和手部坐标，分享前请检查。
+
+## 开发 / Development
 
 ```bash
 npm run typecheck
@@ -40,30 +77,9 @@ npm test
 npm run build
 ```
 
-摄像头模式需要浏览器 Camera 权限，以及 `localhost` 或 HTTPS 安全上下文。建议使用当前版本 Chrome 或 Edge；需 WebGL。没有摄像头也可使用下述演示模式。
+技术栈：TypeScript、[Three.js](https://threejs.org/) `0.186.0`、[@mediapipe/tasks-vision](https://www.npmjs.com/package/@mediapipe/tasks-vision) `1.0.1`、Vite `8.3.0`，版本锁定在 `package-lock.json`，不需要任何账号或 API Key。
 
-## 操作 / Controls
-
-| 动作 | 当前用途 |
-|---|---|
-| 张掌 `OPEN_PALM` | 从掌心召唤阵局；双手张开并拉开可放大、分离盘层 |
-| 捏合 `PINCH` + 转腕 | 抓取并拨动一层盘；双手同时捏合可移动整个阵局 |
-| 伸食指 `POINT`，随后捏合 | 预览并锁定所指宫位 |
-| `PUSH` / `SWIPE` / 捏合后快速松开 `FLICK` / `PULL` | 分别尝试发动坤 / 巽 / 震 / 坎 |
-| 短握拳 / 长握拳 `FIST` | 取消准备中的术式 / 收阵 |
-
-定宫后需等待术式蓄势到 `READY`；真实摄像头的识别效果因光照、设备和手位而异。完整说明见 [手势文档](docs/GESTURES.md)。
-
-## 演示与调试 / Demo & Debug
-
-- `?demo=1`：纯阵局动画；`?spellDemo=1`：固定节奏演示坤、巽、震、坎，均无需摄像头。
-- `?showcase=1`：隐藏调试 UI 的纯背景演示；`?showcase=1&background=camera`：以摄像头作背景，但不把它用作手势输入。
-- 正常摄像头模式加 `?qa=1`，再按 `D` 打开 Debug。`T` 开始/结束最长 60 秒的 QA JSON 会话；`R` 记录最长 10 秒的手势数值 JSON；`C` 运行个人校准。
-- Debug 下数字键 `1`–`4` 是开发用模拟施术，不能用于真人成功率统计。Debug 参数面板中的保存会修改浏览器本地个人参数。
-
-QA JSON 和手势数值记录不包含视频，但可能包含设备信息和手部坐标，默认被 `.gitignore` 排除；分享报告前请自行检查。
-
-## 项目结构 / Structure
+### 项目结构
 
 ```text
 src/
@@ -80,16 +96,16 @@ src/
   main.ts              运行时编排
 ```
 
-贡献者可从 [架构导览](docs/ARCHITECTURE.md)、[手势文档](docs/GESTURES.md) 和 [贡献指南](CONTRIBUTING.md) 开始。
+代码结构见 [架构导览](docs/ARCHITECTURE.md)，参与贡献见 [贡献指南](CONTRIBUTING.md)。
 
 ## Roadmap
 
-- [x] Hand Tracking、悬浮阵、盘层交互、四术原型、校准与自动化审计
-- [ ] 真人摄像头 QA 达标
-- [ ] 真实手部遮挡、电影级视效与音效
-- [ ] 更完整的奇门系统与 Web 部署
+- [x] 手部识别、悬浮阵盘、盘层交互、四种术式原型、校准与自动化测试
+- [ ] 真人摄像头验收
+- [ ] 手部遮挡、视觉与音效打磨
+- [ ] 更完整的奇门系统与网页部署
 
-详细阶段和验收边界见 [ROADMAP.md](ROADMAP.md)。
+详见 [ROADMAP.md](ROADMAP.md)。
 
 ## License 与版权声明 / Disclaimer
 
