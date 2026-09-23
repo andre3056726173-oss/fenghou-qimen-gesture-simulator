@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#020909" />
+    <meta name="description" content="基于 Three.js 与 MediaPipe 的风后奇门手势交互模拟器" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23010403'/%3E%3Ccircle cx='32' cy='32' r='23' fill='none' stroke='%23d2aa58' stroke-width='2'/%3E%3Cpath d='M18 25h28M18 32h11m6 0h11M18 39h28' stroke='%2372dcc3' stroke-width='4'/%3E%3C/svg%3E" />
+    <title>风后奇门 · 手势交互模拟器</title>
+  </head>
+  <body>
+    <main id="app">
+      <video id="camera" class="camera-feed" playsinline muted></video>
+      <div id="scene-root" aria-label="风后奇门三维阵盘"></div>
+      <canvas id="debug-canvas" class="debug-canvas"></canvas>
+      <div class="vignette"></div>
+      <div class="scanlines"></div>
+
+      <header class="brand">
+        <div class="brand-seal">奇</div>
+        <div>
+          <p class="eyebrow">FENGHOU QIMEN / LOCAL VISION SYSTEM</p>
+          <h1>风后奇门</h1>
+        </div>
+      </header>
+
+      <section id="camera-debug-panel" class="camera-debug-panel" aria-live="polite">
+        <p>CAMERA DEBUG</p>
+        <div><span>Camera</span><strong id="camera-debug-label">—</strong></div>
+        <div><span>Resolution</span><strong id="camera-debug-resolution">—</strong></div>
+        <div><span>ReadyState</span><strong id="camera-debug-ready">—</strong></div>
+        <div><span>Device ID</span><strong id="camera-debug-id">—</strong></div>
+      </section>
+
+      <section class="hud-card hud-left" aria-live="polite">
+        <p class="hud-label"><span class="status-dot" id="status-dot"></span>视觉识别</p>
+        <div class="status-row"><span>摄像头</span><strong id="camera-status">待启用</strong></div>
+        <div class="status-row"><span>Hand Tracking</span><strong><span id="tracking-fps">0</span> FPS</strong></div>
+        <div class="status-row"><span>推理位置</span><strong>LOCAL</strong></div>
+      </section>
+
+      <section class="hud-card hud-right" aria-live="polite">
+        <p class="hud-label">GESTURE / 手势</p>
+        <div id="gesture-name" class="gesture-name">等待手势</div>
+        <div class="meter"><i id="confidence-meter"></i></div>
+        <div class="status-row"><span>置信度</span><strong id="confidence-value">0%</strong></div>
+      </section>
+
+      <section class="selection-panel" aria-live="polite">
+        <div class="selection-glyph" id="palace-symbol">◎</div>
+        <div>
+          <p class="hud-label">CURRENT PALACE / 当前宫位</p>
+          <h2 id="palace-name">中宫</h2>
+          <p><span id="palace-element">待命</span><b>·</b><span id="palace-spell">阵法未启</span></p>
+        </div>
+      </section>
+
+      <section id="debug-panel" class="debug-panel" aria-live="polite">
+        <p>DEBUG / VISION TELEMETRY</p>
+        <dl>
+          <div><dt>LANDMARKS</dt><dd id="debug-landmarks">0 / 42</dd></div>
+          <div><dt>WRIST ANGLE</dt><dd id="debug-angle">0.0°</dd></div>
+          <div><dt>PINCH DIST</dt><dd id="debug-pinch">0.000</dd></div>
+          <div><dt>ROTATION</dt><dd id="debug-rotation">0.00 rad/s</dd></div>
+          <div><dt>HANDS</dt><dd id="debug-hands">0</dd></div>
+          <div><dt>CAMERAS</dt><dd id="debug-camera-count">0</dd></div>
+          <div><dt>ACTIVE CAMERA</dt><dd id="debug-camera-active">未选择</dd></div>
+          <div><dt>DEVICE ID</dt><dd id="debug-camera-id">—</dd></div>
+          <div><dt>RESOLUTION</dt><dd id="debug-camera-resolution">—</dd></div>
+          <div><dt>CAM FPS</dt><dd id="debug-camera-fps">—</dd></div>
+          <div><dt>MIRROR</dt><dd id="debug-camera-mirror">ON</dd></div>
+          <div><dt>INPUT SIZE</dt><dd id="debug-input-size">—</dd></div>
+        </dl>
+      </section>
+
+      <div id="toast" class="toast" role="status"></div>
+
+      <div class="start-panel" id="start-panel">
+        <div class="start-orbit"><span></span><span></span><span></span><b>遁</b></div>
+        <p class="eyebrow">CAMERA-BASED RITUAL INTERFACE</p>
+        <h2>以掌为引，起局成阵</h2>
+        <p class="privacy-copy">摄像头画面仅在本机浏览器中参与 MediaPipe 推理，不会上传。</p>
+        <div class="start-actions">
+          <button id="camera-button" class="primary-button">启用摄像头</button>
+          <button id="demo-button" class="ghost-button">键盘演示</button>
+        </div>
+        <p class="compat-note">推荐 Chrome / Edge · localhost 或 HTTPS · 允许摄像头权限</p>
+      </div>
+
+      <footer class="control-bar">
+        <div class="instruction"><kbd>张掌</kbd><span>召唤</span></div>
+        <div class="instruction"><kbd>握拳</kbd><span>收阵</span></div>
+        <div class="instruction"><kbd>指向</kbd><span>择宫</span></div>
+        <div class="instruction"><kbd>捏合</kbd><span>确认</span></div>
+        <div class="instruction"><kbd>前推</kbd><span>施术</span></div>
+        <button id="debug-button" class="text-button">DEBUG <span>OFF</span></button>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
