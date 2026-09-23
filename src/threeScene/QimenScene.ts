@@ -14,7 +14,7 @@ import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { VISUAL_QUALITY, qualityFromPerformanceTier, type VisualQualityLevel } from './VisualQualityConfig';
 import { landmarkToViewport } from '../handTracking/CameraCoordinates';
 import { FORMATION_STYLE, FRONT_FORMATION_CENTER, FRONT_MAX_SPACE_SCALE, FRONT_MIN_SPACE_SCALE } from '../qimen/FormationStyle';
-import { intersectPlateLocal } from '../qimen/FormationPicking';
+import { intersectPlateLocal, sectorFromLocalPoint } from '../qimen/FormationPicking';
 import { disposeObjectTrees } from './ResourceLifecycle';
 
 /** Chest-front floating formation stage. Hand landmarks are projected into this space, never onto a floor. */
@@ -298,34 +298,33 @@ export class QimenScene {
     }
   }
 
-  pointingSector(snapshot: GestureSnapshot, handSpeed = 0) {
+  pointingHit(snapshot: GestureSnapshot, handSpeed = 0) {
     if (!snapshot.landmarks.length || !snapshot.pointing) {
       this.stablePointingSector = null;
-      return null;
+      return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'NOT_POINTING' };
     }
     const points = snapshot.landmarks[0];
     const hit = this.rayFromFinger(points);
-    if (!hit) return null;
+    if (!hit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
     const localHit = this.formation.heavenPlate.worldToLocal(hit.clone());
     const radius = Math.hypot(localHit.x, localHit.z);
-    if (radius < 0.25 || radius > 5.35) return null;
     const angle = Math.atan2(localHit.z, localHit.x);
-    let best = 0;
-    let smallest = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < 8; index += 1) {
-      const target = Math.PI / 2 - index * Math.PI / 4;
-      const difference = Math.abs(Math.atan2(Math.sin(angle - target), Math.cos(angle - target)));
-      if (difference < smallest) { smallest = difference; best = index; }
-    }
+    const location = { hit: true, localX: localHit.x, localY: localHit.y, localZ: localHit.z, angle };
+    if (radius < 0.25 || radius > 5.35) return { ...location, sector: null, reason: 'OUTSIDE_FORMATION' };
+    const best = sectorFromLocalPoint(localHit.x, localHit.z);
     if (this.stablePointingSector !== null && this.stablePointingSector !== best) {
       const stableAngle = Math.PI / 2 - this.stablePointingSector * Math.PI / 4;
       const difference = Math.abs(Math.atan2(Math.sin(angle - stableAngle), Math.cos(angle - stableAngle)));
       // Slow pointing favours a wider buffer; fast sweeps can cross sectors responsively.
       const extra = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(10 - handSpeed * 10, 3, 10));
-      if (difference < Math.PI / 8 + extra) return this.stablePointingSector;
+      if (difference < Math.PI / 8 + extra) return { ...location, sector: this.stablePointingSector, reason: 'SECTOR_HYSTERESIS' };
     }
     this.stablePointingSector = best;
-    return best;
+    return { ...location, sector: best, reason: 'HIT' };
+  }
+
+  pointingSector(snapshot: GestureSnapshot, handSpeed = 0) {
+    return this.pointingHit(snapshot, handSpeed).sector;
   }
 
   /** Chooses the plate whose radial band is nearest the hand/finger contact point. */

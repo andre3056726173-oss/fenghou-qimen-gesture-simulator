@@ -12,3 +12,8 @@ export function sectorPoint(sector: number, radius: number, depth: number, targe
   const angle = Math.PI / 2 - sector * Math.PI / 4;
   return target.set(Math.cos(angle) * radius, depth, Math.sin(angle) * radius);
 }
+
+export function sectorFromLocalPoint(x: number, z: number) {
+  const angle = Math.atan2(z, x);
+  return ((Math.round((Math.PI / 2 - angle) / (Math.PI / 4)) % 8) + 8) % 8;
+}

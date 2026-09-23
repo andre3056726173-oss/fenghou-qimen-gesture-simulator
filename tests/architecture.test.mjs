@@ -6,14 +6,16 @@ import { HandTracker } from '../src/handTracking/HandTracker.ts';
 import { GestureMotionDetector } from '../src/gestureRecognition/GestureMotionDetector.ts';
 import { DEFAULT_GESTURE_TUNING } from '../src/gestureRecognition/GestureTuning.ts';
 import { GestureRecognizer } from '../src/gestureRecognition/GestureRecognizer.ts';
+import { GestureSmoother } from '../src/gestureRecognition/GestureSmoother.ts';
 import { GestureStateMachine } from '../src/gestureRecognition/GestureStateMachine.ts';
+import { SectorFocusController } from '../src/gestureRecognition/SectorFocusController.ts';
 import { GestureChoreographyController } from '../src/gestureRecognition/GestureChoreographyController.ts';
 import { GesturePriorityResolver } from '../src/gestureRecognition/GesturePriorityResolver.ts';
 import { SpellCastController } from '../src/spells/SpellCastController.ts';
 import { SpellResolver } from '../src/spells/SpellResolver.ts';
 import { SPELL_DEFINITIONS } from '../src/spells/SpellDefinition.ts';
 import { PerformanceGovernor } from '../src/threeScene/PerformanceGovernor.ts';
-import { intersectPlateLocal } from '../src/qimen/FormationPicking.ts';
+import { intersectPlateLocal, sectorFromLocalPoint, sectorPoint } from '../src/qimen/FormationPicking.ts';
 import { landmarkToViewport } from '../src/handTracking/CameraCoordinates.ts';
 import { stateViolations } from '../src/StateInvariantGuard.ts';
 import { QimenFormation } from '../src/qimen/QimenFormation.ts';
@@ -40,6 +42,23 @@ const snapshot = (x = .5, z = 0) => ({ ...empty(), handCount: 1, palmCenter: { x
 const context = (action = 'HOLD') => ({ selectedSector: 1, lockedSector: 1, earthPlateAngle: 0, humanPlateAngle: 0, heavenPlateAngle: 0, spiritPlateAngle: 0, dominantHand: 'Right', currentGesture: 'OPEN_PALM', handVelocity: { x: 0, y: 0, z: 0 }, handDepthVelocity: 0, formationScale: 1, formationState: 'ACTIVE', castStage: 'NONE', action, castIntensity: 1, castDirection: { x: 1, y: 0, z: 0 }, chargeScale: 1 });
 const stabilized = (patch = {}) => ({ raw: empty(), openPalm: false, fist: false, pointing: false, pinch: false, twoHandsOpen: false, twoHandsPinch: false, ...patch });
 
+function posedHand(pose) {
+  const points = Array.from({ length: 21 }, () => ({ x: .5, y: .6, z: 0 }));
+  const set = (i, x, y) => { points[i] = { x, y, z: 0 }; };
+  set(0, .5, .82);
+  [[1, .4, .68], [2, .35, .62], [3, .3, .56], [4, .24, .52],
+    [5, .42, .58], [9, .5, .56], [13, .58, .58], [17, .66, .62]].forEach(([i, x, y]) => set(i, x, y));
+  if (pose === 'OPEN') {
+    [[6, .4, .45], [7, .39, .35], [8, .38, .26], [10, .5, .43], [11, .5, .33], [12, .5, .24],
+      [14, .6, .45], [15, .61, .36], [16, .62, .27], [18, .7, .52], [19, .72, .44], [20, .74, .37]].forEach(([i, x, y]) => set(i, x, y));
+  } else {
+    [[6, .42, .47], [7, .46, .53], [8, .49, .6], [10, .5, .46], [11, .54, .53], [12, .55, .6],
+      [14, .58, .48], [15, .56, .54], [16, .55, .61], [18, .67, .53], [19, .63, .58], [20, .6, .63]].forEach(([i, x, y]) => set(i, x, y));
+    if (pose === 'POINT') { set(6, .4, .45); set(7, .39, .35); set(8, .38, .26); }
+  }
+  return { landmarks: points, handedness: 'Right', confidence: .95 };
+}
+
 test('camera frame identity survives repeated RAF ticks and stalled video becomes unavailable', () => {
   const video = { readyState: 2, currentTime: 1 };
   const tracker = new HandTracker(video);
@@ -50,6 +69,87 @@ test('camera frame identity survives repeated RAF ticks and stalled video become
   video.currentTime = 2; assert.equal(gate.accept(tracker.detect(1033)), true);
   assert.equal(tracker.detect(1290).hands.length, 0);
   assert.equal(validHandLandmarks([{ x: NaN, y: 1, z: 0 }]), false);
+});
+
+test('open fingers veto a false fist; confirmed fist needs distinct samples and cancels on reextension', () => {
+  const s = new GestureSmoother();
+  const folded = { ...empty(), handCount: 1, name: 'FIST', fist: true, fistScore: .95, curledFingerCount: 4, extendedFingerCount: 0 };
+  assert.equal(s.update(folded, 1000).fistCandidate, true);
+  assert.equal(s.update({ ...folded, extendedFingerCount: 3 }, 1100).fist, false);
+  assert.equal(s.update(folded, 1200).fistCandidate, true);
+  assert.equal(s.update(folded, 1300).fist, false);
+  assert.equal(s.update(folded, 1400).fist, false);
+  assert.equal(s.update(folded, 1500).stableGesture, 'FIST_CONFIRMED');
+  assert.equal(s.update({ ...folded, openPalm: true, extendedFingerCount: 4 }, 1533).fist, false);
+  s.update(folded, 1600); s.update(folded, 1700); s.update(folded, 1800); s.update(folded, 1900);
+  assert.equal(s.update(empty(), 1933).fist, false);
+});
+
+test('recognizer separates a natural index point, open hand and positive curled fist evidence', () => {
+  const r = new GestureRecognizer();
+  const read = (pose, timestamp) => r.update({ hands: [posedHand(pose)], timestamp, fps: 30 });
+  const open = read('OPEN', 1000);
+  assert.equal(open.openPalm, true); assert.equal(open.fist, false);
+  assert.ok(open.extendedFingerCount >= 3);
+  const point = read('POINT', 1033);
+  assert.equal(point.pointing, true); assert.equal(point.fist, false);
+  const fist = read('FIST', 1066);
+  assert.equal(fist.fist, true); assert.ok(fist.curledFingerCount >= 3);
+});
+
+test('POINT focus survives the index-to-pinch gap and takes priority over plate rotation', () => {
+  const focus = new SectorFocusController(), machine = new GestureStateMachine();
+  machine.state = 'ACTIVE';
+  assert.equal(focus.update(1, 1000, true).stage, 'HOVER');
+  assert.equal(focus.update(1, 1160, true).stage, 'FOCUSED');
+  focus.update(null, 1300, false);
+  assert.equal(focus.focusedSector, 1);
+  const events = machine.update(stabilized({ pinch: true }), 'ACTIVE', 1300, 0,
+    { manipulation: true, space: true, suppressFistCollapse: false, lockSector: focus.focusedSector !== null });
+  assert.equal(events[0].type, 'LOCK');
+  assert.equal(machine.state, 'LOCKING');
+  focus.lock(1);
+  focus.update(null, 1700, false);
+  assert.equal(focus.focusedSector, null);
+  assert.equal(focus.lockedSector, 1);
+  focus.update(1, 1800, true); focus.update(1, 1960, true);
+  focus.update(null, 1970, true);
+  assert.equal(focus.focusedSector, null);
+  focus.clearFocus();
+  assert.equal(focus.lockedSector, 1);
+});
+
+test('confirmed fist cancels a primed KUN spell first and collapses only after a continued hold', () => {
+  const machine = new GestureStateMachine(), choreography = new GestureChoreographyController();
+  const controller = new SpellCastController();
+  controller.lockSector(1, SPELL_DEFINITIONS[0], 900);
+  machine.state = 'ACTIVE';
+  const frame = (timestamp) => choreography.update({ timestamp, formationActive: true, state: machine.state,
+    spellStage: controller.stage, hasHand: true, fist: true, pointing: false, rotating: false, gracePeriodMs: 250 });
+  const admission = (result) => ({ manipulation: true, space: true, suppressFistCollapse: !result.collapseFormation });
+  const early = frame(1000);
+  assert.equal(early.cancelSpell, false);
+  assert.deepEqual(machine.update(stabilized({ fist: true }), 'ACTIVE', 1000, 0, admission(early)), []);
+  const short = frame(1280);
+  assert.equal(short.cancelSpell, true); assert.equal(short.collapseFormation, false);
+  controller.cancel(1280);
+  assert.equal(controller.lockedSector, 1);
+  assert.deepEqual(machine.update(stabilized({ fist: true }), 'ACTIVE', 1280, 0, admission(short)), []);
+  const long = frame(1800);
+  assert.equal(long.collapseFormation, true);
+  assert.equal(machine.update(stabilized({ fist: true }), 'ACTIVE', 1800, 0, admission(long))[0].type, 'COLLAPSE');
+});
+
+test('KUN target stays KUN when the front formation is positioned, rolled and scaled', () => {
+  const root = new THREE.Group(), plate = new THREE.Group(); root.add(plate);
+  root.position.set(.3, 1.2, -2); root.rotation.set(1.42, .07, -.12); root.scale.setScalar(1.4);
+  plate.position.y = .08; plate.rotation.y = .31;
+  root.updateMatrixWorld(true);
+  const world = plate.localToWorld(sectorPoint(1, 3.8, .117));
+  const origin = new THREE.Vector3(0, 1.4, 3);
+  const local = intersectPlateLocal(new THREE.Ray(origin, world.sub(origin).normalize()), plate, .117);
+  assert.ok(local);
+  assert.equal(sectorFromLocalPoint(local.x, local.z), 1);
 });
 
 test('sample-clock derivatives are not doubled by display FPS; duplicate samples emit no event', () => {

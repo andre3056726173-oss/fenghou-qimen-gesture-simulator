@@ -46,6 +46,11 @@ export interface GestureSnapshot {
   openPalm: boolean;
   fist: boolean;
   pointing: boolean;
+  openPalmScore: number;
+  fistScore: number;
+  pointScore: number;
+  extendedFingerCount: number;
+  curledFingerCount: number;
   pinchActive: boolean;
   twoHandsOpen: boolean;
   twoHandsPinch: boolean;

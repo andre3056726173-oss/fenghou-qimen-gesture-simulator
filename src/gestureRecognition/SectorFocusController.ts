@@ -12,15 +12,24 @@ export class SectorFocusController {
   private candidateSince = 0;
   private focused: number | null = null;
   private locked: number | null = null;
+  private lastPointAt = 0;
 
   update(sector: number | null, timestamp: number, pointing: boolean): SectorFocusState {
-    if (!pointing || sector === null) {
+    if (pointing && sector === null) {
       this.candidate = null;
       this.candidateSince = 0;
       this.focused = null;
-      this.locked = null;
       return { sector: null, stage: 'NONE', confidence: 0 };
     }
+    if (!pointing) {
+      this.candidate = null;
+      this.candidateSince = 0;
+      // The index finger naturally bends before PINCH becomes stable. Preserve only a
+      // recently focused target across that transition; a stale hover cannot lock.
+      if (timestamp - this.lastPointAt > 300) this.focused = null;
+      return { sector: null, stage: 'NONE', confidence: 0 };
+    }
+    this.lastPointAt = timestamp;
     if (sector !== this.candidate) {
       this.candidate = sector;
       this.candidateSince = timestamp;
@@ -41,11 +50,17 @@ export class SectorFocusController {
   }
 
   get focusedSector() { return this.focused; }
+  get lockedSector() { return this.locked; }
 
-  reset() {
+  clearFocus() {
     this.candidate = null;
     this.candidateSince = 0;
     this.focused = null;
+    this.lastPointAt = 0;
+  }
+
+  reset() {
+    this.clearFocus();
     this.locked = null;
   }
 }

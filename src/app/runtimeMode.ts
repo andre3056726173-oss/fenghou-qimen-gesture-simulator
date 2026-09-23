@@ -8,13 +8,15 @@ export function readRuntimeMode(location: Location = window.location) {
   const params = new URLSearchParams(location.search);
   const showcase = params.get('showcase') === '1';
   const spellDemo = SPELL_DEMO_MODE || params.get('spellDemo') === '1';
+  const kunQa = params.get('qa') === 'kun';
   return {
     showcase,
     showcaseCameraBackground: showcase && params.get('background') === 'camera',
     spellDemo,
     presentationDemo: spellDemo || showcase,
     formationDemo: params.get('demo') === '1' || location.pathname === '/demo',
-    realQa: REAL_QA_MODE || params.get('qa') === '1',
+    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa,
+    kunQa,
     cameraDebug: params.get('cameraDebug') === '1',
   };
 }

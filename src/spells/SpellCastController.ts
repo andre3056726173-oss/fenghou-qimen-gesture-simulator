@@ -21,6 +21,13 @@ export class SpellCastController {
     return Math.max(0, this.cooldownUntil - timestamp);
   }
 
+  /** Read-only progress for debug; the cast gate still belongs to update(). */
+  chargeProgress(timestamp: number, chargeScale = 1) {
+    if (this.stage === 'READY' || this.stage === 'CASTING') return 1;
+    if (this.stage !== 'CHARGING' || !this.activeSpell) return 0;
+    return Math.max(0, Math.min(1, (timestamp - this.stageSince) / (this.activeSpell.chargeMs * chargeScale)));
+  }
+
   lockSector(sector: number | null, spell: SpellDefinition | null, timestamp: number): SpellControllerEvent[] {
     if (this.stage === 'CASTING' || timestamp < this.cooldownUntil) return [];
     if (sector !== null && (!Number.isInteger(sector) || sector < 0 || sector > 7 || (spell && spell.sector !== sector))) return [];

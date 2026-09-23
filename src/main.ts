@@ -49,6 +49,7 @@ const hud = new Hud();
 const debug = new DebugOverlay(debugCanvas);
 const audioBus = new AudioEventBus();
 const sectorFocus = new SectorFocusController();
+let cachedFocusState = sectorFocus.update(null, 0, false);
 const tuning = new GestureTuningStore();
 const motionDetector = new GestureMotionDetector(tuning);
 const inputBuffer = new GestureInputBuffer();
@@ -67,6 +68,7 @@ let animationFrame = 0;
 let lastActionSampleAt = 0;
 let lastPrimaryHand: string | null = null;
 let cachedSnapshot = recognizer.update({ hands: [], timestamp: 0, fps: 0 });
+let cachedStabilized = smoother.update(cachedSnapshot, 0);
 let cachedMotion = motionDetector.update(cachedSnapshot, 0);
 let cachedRotation = rotationController.update(undefined, 0);
 const unsubscribeTuning = tuning.onChange((values) => qimen.formation.setSnapDamping(values.snapDamping));
@@ -78,7 +80,6 @@ let latestFps = 0;
 let previousHoveredPlate: number | null = null;
 let previousFocusedSector: number | null = null;
 let previousSpellStage = qimen.spellSystem.stage;
-let ignoreFistCollapseUntilRelease = false;
 let lastCalibrationInstruction = '';
 let currentInteractionTimestamp = 0;
 let handWasMissing = false;
@@ -87,8 +88,22 @@ const showcaseMode = mode.showcase;
 const showcaseCameraBackground = mode.showcaseCameraBackground;
 const presentationDemoMode = mode.presentationDemo;
 const realQaMode = mode.realQa;
+const kunQaMode = mode.kunQa;
 const cameraDebugMode = mode.cameraDebug;
 const camera = new CameraSession(video, appEvents.signal, () => disposed);
+const kunTimeline = new InteractionEventTimeline();
+const kunTraceEdges = new Map<string, string>();
+let kunFailure = '—';
+function traceKun(key: string, value: string, timestamp: number) {
+  if (!kunQaMode || kunTraceEdges.get(key) === value) return;
+  kunTraceEdges.set(key, value);
+  kunTimeline.push(timestamp, `${key} ${value}`);
+}
+if (kunQaMode) {
+  debug.toggle(true);
+  debugButton.querySelector('span')!.textContent = 'ON';
+  qa.setEnabled(true);
+}
 if (cameraDebugMode) document.body.classList.add('camera-debug');
 if (showcaseMode) {
   document.body.classList.add('showcase-mode');
@@ -107,6 +122,10 @@ function emitSpellEvents(events: SpellControllerEvent[]) {
   events.forEach((event) => {
     if (event.type === 'stage') {
       if (debug.enabled) timeline.push(currentInteractionTimestamp, `${event.stage}${event.spell ? ` ${event.spell.id}` : ''}`);
+      if (event.spell?.id === 'KUN_EARTH') {
+        traceKun('SPELL_STAGE', event.stage, currentInteractionTimestamp);
+        if (event.stage === 'READY') kunFailure = '—';
+      }
       if (!demoMode && event.stage === 'PREPARING' && event.spell) qa.attempt(event.spell.id);
       if (event.stage === 'PREPARING' && previousSpellStage !== 'PREPARING') audioBus.emit('spell_prepare');
       if (event.stage === 'READY' && previousSpellStage !== 'READY') audioBus.emit('spell_ready');
@@ -115,6 +134,7 @@ function emitSpellEvents(events: SpellControllerEvent[]) {
     }
     audioBus.emit('spell_cast');
     if (debug.enabled) timeline.push(currentInteractionTimestamp, `CAST ${event.spell.id}`);
+    if (event.spell.id === 'KUN_EARTH') traceKun('CAST', 'KUN_EARTH', currentInteractionTimestamp);
     if (!demoMode) qa.success(event.spell.id, Math.max(0, currentInteractionTimestamp - lastActionSampleAt));
     if (event.spell.id === 'KUN_EARTH') audioBus.emit('earth_cast');
     if (event.spell.id === 'XUN_WIND') audioBus.emit('wind_cast');
@@ -136,11 +156,14 @@ const spellDemoDirector = new SpellDemoDirector(qimen, {
 function resetInteractionRuntime() {
   stateMachine.reset(); smoother.reset(); recognizer.reset(); motionDetector.reset(); rotationController.reset();
   choreography.reset(); sectorFocus.reset(); inputBuffer.clear(); sampleGate.reset();
-  selectedSector = null; ignoreFistCollapseUntilRelease = false;
+  cachedFocusState = sectorFocus.update(null, 0, false);
+  selectedSector = null;
   previousFocusedSector = null; previousHoveredPlate = null;
+  kunTraceEdges.clear(); kunFailure = '—';
   qimen.handSpace.reset(); qimen.resetSpellSystem(); qimen.spellSystem.visuals.clear();
   qimen.animator.restart();
   cachedSnapshot = recognizer.update(emptyFrame(0));
+  cachedStabilized = smoother.update(cachedSnapshot, 0);
   cachedMotion = motionDetector.update(cachedSnapshot, 0);
   cachedRotation = rotationController.update(undefined, 0);
 }
@@ -219,7 +242,10 @@ window.addEventListener('keydown', (event) => {
 
 function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sampleTimestamp: number, freshSample: boolean) {
   currentInteractionTimestamp = timestamp;
-  const stabilized = smoother.update(snapshot, timestamp);
+  // Stability advances on camera samples, never by replaying one misclassified frame on RAF ticks.
+  if (freshSample) cachedStabilized = smoother.update(snapshot, sampleTimestamp);
+  const stabilized = cachedStabilized;
+  const confirmedFist = stabilized.fist && snapshot.fist && !snapshot.pointing && snapshot.extendedFingerCount === 0 && timestamp - sampleTimestamp <= 150;
   if (freshSample) {
     cachedMotion = motionDetector.update(snapshot, sampleTimestamp);
     cachedRotation = rotationController.update(snapshot.landmarks[0], sampleTimestamp);
@@ -229,19 +255,25 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   if (stabilized.pointing) inputBuffer.push('POINT', timestamp);
   if (stabilized.pinch) inputBuffer.push('PINCH', timestamp);
   if (stabilized.openPalm) inputBuffer.push('OPEN_PALM', timestamp);
-  if (snapshot.fist) inputBuffer.push('FIST', timestamp);
+  if (confirmedFist) inputBuffer.push('FIST', timestamp);
   if (motion.action) inputBuffer.push(motion.action, freshSample ? sampleTimestamp : timestamp, motion.intensity, motion.direction);
   if (freshSample && motion.action && motion.action !== 'HOLD') lastActionSampleAt = sampleTimestamp;
   if (!snapshot.handCount && !handWasMissing) { if (debug.enabled) timeline.push(timestamp, 'HAND_LOST'); qa.lostHand(); }
   if (debug.enabled && snapshot.handCount && handWasMissing) timeline.push(timestamp, 'HAND_REACQUIRED');
   handWasMissing = !snapshot.handCount;
+  if (freshSample) {
+    traceKun('GESTURE_CANDIDATE', stabilized.gestureCandidate, timestamp);
+    traceKun('STABLE_GESTURE', stabilized.stableGesture, timestamp);
+    traceKun('PINCH_RAW', snapshot.pinchActive ? 'ON' : 'OFF', timestamp);
+    traceKun('PINCH_STABLE', stabilized.pinch ? 'ON' : 'OFF', timestamp);
+  }
   const choreographyState = choreography.update({
     timestamp,
     formationActive: qimen.animator.phase === 'ACTIVE',
     state: stateMachine.state,
     spellStage: qimen.spellSystem.stage,
     hasHand: snapshot.handCount > 0,
-    fist: snapshot.fist,
+    fist: confirmedFist,
     pointing: stabilized.pointing,
     rotating: stateMachine.state === 'ROTATING',
     gracePeriodMs: tuning.values.gracePeriodMs,
@@ -251,35 +283,50 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     if (qimen.spellSystem.activeSpell) qa.failure(qimen.spellSystem.activeSpell.id, snapshot.handCount ? 'CANCELLED' : 'LOST_HAND');
     emitSpellEvents(qimen.cancelPreparedSpell(timestamp));
     stateMachine.recoverActive();
-    ignoreFistCollapseUntilRelease = snapshot.fist;
     hud.toast('术式撤销 · 阵局仍维持');
   }
-  if (choreographyState.collapseFormation && qimen.animator.phase === 'ACTIVE') {
-    qimen.animator.collapse();
-    qimen.resetSpellSystem();
-    qimen.endSpaceGrab();
-    selectedSector = null;
-    sectorFocus.reset();
-    inputBuffer.clear();
-    ignoreFistCollapseUntilRelease = false;
-    audioBus.emit('formation_collapse');
-  }
   const rotation = cachedRotation;
-  const pointingSnapshot = { ...snapshot, pointing: stabilized.pointing };
+  // Freeze the target while the index bends into a pinch; that transition is not a new ray aim.
+  const pointingActive = stabilized.pointing && !snapshot.pinchActive;
+  const pointingSnapshot = { ...snapshot, pointing: pointingActive };
   const hoveredPlate = qimen.updatePlateHover(pointingSnapshot, timestamp);
   if (hoveredPlate !== previousHoveredPlate) {
     if (hoveredPlate !== null) audioBus.emit('plate_hover');
     previousHoveredPlate = hoveredPlate;
   }
-  const candidateSector = stabilized.pointing ? qimen.pointingSector(pointingSnapshot, motion.speed) : null;
-  const focusState = sectorFocus.update(candidateSector, timestamp, stabilized.pointing);
+  const rayHit = pointingActive ? qimen.pointingHit(pointingSnapshot, motion.speed) : null;
+  const candidateSector = rayHit?.sector ?? null;
+  if (freshSample && !snapshot.handCount) sectorFocus.clearFocus();
+  const focusState = freshSample
+    ? (cachedFocusState = sectorFocus.update(candidateSector, sampleTimestamp, pointingActive))
+    : cachedFocusState;
+  if (kunQaMode && freshSample && pointingActive) {
+    traceKun('FINGER_RAY', rayHit?.hit ? `${rayHit.reason} ${candidateSector === null ? '—' : PALACES[candidateSector]?.name}` : rayHit?.reason ?? 'NO_RAY', timestamp);
+    if (!rayHit?.hit || candidateSector === null) kunFailure = `RAY_${rayHit?.reason ?? 'NO_RAY'}`;
+    else if (candidateSector !== 1) kunFailure = `RAY_SECTOR_${PALACES[candidateSector]?.name ?? candidateSector}`;
+  }
+  if (kunQaMode && freshSample && snapshot.pointing && !stabilized.pointing) {
+    kunFailure = 'POINT_WAIT_STABILITY';
+    traceKun('POINT_PENDING', 'WAIT_STABILITY', timestamp);
+  }
+  if (kunQaMode && freshSample && pointingActive && candidateSector === 1 && focusState.stage === 'HOVER') {
+    kunFailure = 'KUN_FOCUS_WAIT_STABILITY';
+    traceKun('KUN_FOCUS', 'WAIT_STABILITY', timestamp);
+  }
   if (focusState.stage === 'FOCUSED' && focusState.sector !== previousFocusedSector) {
     audioBus.emit('sector_focus');
     if (debug.enabled) timeline.push(timestamp, `SECTOR_FOCUS ${PALACES[focusState.sector ?? 0]?.name ?? '—'}`);
-    if (qimen.spellSystem.activeSpell && focusState.sector !== qimen.spellSystem.lockedSector) emitSpellEvents(qimen.cancelPreparedSpell(timestamp));
+    traceKun('SECTOR_FOCUS', PALACES[focusState.sector ?? 0]?.name ?? '—', timestamp);
+    if (focusState.sector === 1) kunFailure = '—';
     previousFocusedSector = focusState.sector;
   }
   if (focusState.stage !== 'FOCUSED' && focusState.stage !== 'LOCKED') previousFocusedSector = null;
+  const lockAvailable = snapshot.handCount > 0 && timestamp - sampleTimestamp <= 150 &&
+    sectorFocus.focusedSector !== null && qimen.animator.phase === 'ACTIVE';
+  if (kunQaMode && freshSample && stabilized.pinch && !lockAvailable && selectedSector === 1 && qimen.spellSystem.lockedSector !== 1) {
+    kunFailure = 'PINCH_NO_STABLE_KUN_FOCUS';
+    traceKun('LOCK_FAILED', kunFailure, timestamp);
+  }
   let spellMotion = motion;
   if (snapshot.handCount && qimen.spellSystem.stage === 'READY' && (!motion.action || motion.action === 'HOLD')) {
     const spell = qimen.spellSystem.activeSpell;
@@ -288,18 +335,19 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     if (buffered) { spellMotion = { ...motion, action: buffered.intent as SpellAction, intensity: buffered.intensity, direction: buffered.direction ?? motion.direction }; lastActionSampleAt = buffered.timestamp; }
   }
   const actionPriority = priorityResolver.resolve({
-    fist: snapshot.fist,
+    fist: confirmedFist && choreographyState.collapseFormation,
     spellStage: qimen.spellSystem.stage,
     motion: spellMotion,
-    locking: stateMachine.state === 'LOCKING',
+    locking: stateMachine.state === 'LOCKING' || (stabilized.pinch && lockAvailable),
     rotating: stateMachine.state === 'ROTATING',
-    pointing: stabilized.pointing || choreographyState.pointPrewarm,
+    pointing: pointingActive || choreographyState.pointPrewarm,
     spaceGesture: stabilized.twoHandsOpen || stabilized.twoHandsPinch,
   });
   const admission = {
     manipulation: actionPriority !== 'CAST' && qimen.spellSystem.stage !== 'CASTING',
     space: !['READY', 'CASTING'].includes(qimen.spellSystem.stage) && actionPriority !== 'CAST',
-    suppressFistCollapse: snapshot.fist && (ignoreFistCollapseUntilRelease || ['PREPARING', 'ALIGNED', 'CHARGING', 'READY'].includes(qimen.spellSystem.stage)),
+    suppressFistCollapse: (snapshot.fist || stabilized.fist) && !choreographyState.collapseFormation,
+    lockSector: lockAvailable,
   };
   const events = stateMachine.update(stabilized, qimen.animator.phase, timestamp, rotation.velocity, admission);
 
@@ -314,16 +362,14 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       audioBus.emit('summon_start');
       hud.toast('张掌 · 阵局展开');
     } else if (event.type === 'COLLAPSE') {
-      if (ignoreFistCollapseUntilRelease && snapshot.fist) {
-        stateMachine.recoverActive();
-        return;
-      }
       qimen.animator.collapse();
       qimen.endSpaceGrab();
       if (debug.enabled) timeline.push(timestamp, 'FORMATION_COLLAPSE');
+      traceKun('FORMATION', 'COLLAPSE_CONFIRMED', timestamp);
       audioBus.emit('formation_collapse');
       selectedSector = null;
       sectorFocus.reset();
+      cachedFocusState = sectorFocus.update(null, 0, false);
       motionDetector.reset();
       qimen.resetSpellSystem();
       inputBuffer.clear();
@@ -350,27 +396,39 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     } else if (event.type === 'END_GRAB') {
       qimen.endSpaceGrab();
     } else if (event.type === 'POINT') {
-      const sector = focusState.sector ?? qimen.pointingSector(event.snapshot.raw);
+      const sector = focusState.sector;
       if (sector !== null) {
         selectedSector = sector;
         if (debug.enabled) timeline.push(timestamp, `POINT ${PALACES[sector]?.name ?? sector}`);
+        traceKun('POINT', PALACES[sector]?.name ?? String(sector), timestamp);
         if (focusState.stage === 'FOCUSED' || focusState.stage === 'LOCKED') qimen.formation.focus(sector, focusState.confidence);
         else qimen.formation.preview(sector, 0.32);
         hud.setPalace(PALACES[sector]);
       }
     } else if (event.type === 'LOCK') {
-      const sector = sectorFocus.focusedSector ?? selectedSector ?? qimen.pointingSector(event.snapshot.raw);
+      const sector = sectorFocus.focusedSector;
+      traceKun('LOCK_INTENT', sector === null ? 'NO_FOCUSED_SECTOR' : PALACES[sector]?.name ?? String(sector), timestamp);
       if (sector !== null) {
         const lockEvents = qimen.lockSpellSector(sector, timestamp);
-        if (!lockEvents.length) return;
+        if (!lockEvents.length) {
+          kunFailure = qimen.animator.phase !== 'ACTIVE' ? 'LOCK_FORMATION_INACTIVE' : 'LOCK_CASTING_OR_COOLDOWN';
+          traceKun('LOCK_FAILED', kunFailure, timestamp);
+          return;
+        }
         selectedSector = sector;
         if (debug.enabled) timeline.push(timestamp, `LOCK ${PALACES[sector]?.name ?? sector}`);
+        traceKun('LOCKED_SECTOR', PALACES[sector]?.name ?? String(sector), timestamp);
+        traceKun('SPELL_CANDIDATE', qimen.spellSystem.activeSpell?.id ?? 'NONE', timestamp);
+        kunFailure = '—';
         sectorFocus.lock(sector);
         qimen.formation.activate(sector, 1);
         inputBuffer.clear();
         emitSpellEvents(lockEvents);
         audioBus.emit('sector_lock');
         hud.setPalace(PALACES[sector], true);
+      } else {
+        kunFailure = 'LOCK_NO_FOCUSED_SECTOR';
+        traceKun('LOCK_FAILED', kunFailure, timestamp);
       }
     }
   });
@@ -381,18 +439,25 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     else qimen.formation.preview(focusState.sector, 0.32);
   }
 
-  if (!snapshot.fist && !stabilized.fist) ignoreFistCollapseUntilRelease = false;
-
   if (qimen.animator.phase === 'ACTIVE' && admission.manipulation && admission.space && !admission.suppressFistCollapse && (stabilized.twoHandsOpen || stabilized.twoHandsPinch)) {
     qimen.setSpaceScale(stabilized.handDistance, snapshot.scaleVelocity);
     if (Math.abs(snapshot.scaleVelocity) > 0.12) audioBus.emit('formation_scale');
   } else qimen.formation.setSplitProgress(0);
   qimen.updateHandAnchor(snapshot, timestamp);
   qimen.updateRotationTether(snapshot, stateMachine.state === 'ROTATING', qimen.formation.grabbedPlate);
+  const spellStageBeforeUpdate = qimen.spellSystem.stage;
   const spellEvents = choreographyState.spellPaused
     ? []
     : qimen.updateSpellSystem(snapshot, spellMotion, selectedSector, timestamp, dominantHand.preferred, tuning.values.chargeScale);
   emitSpellEvents(spellEvents);
+  if (freshSample && kunQaMode && spellMotion.action === 'PUSH') {
+    traceKun('PUSH', `score=${motion.pushScore.toFixed(2)} stage=${spellStageBeforeUpdate}`, timestamp);
+    if (qimen.spellSystem.lockedSector !== 1) kunFailure = 'PUSH_WITHOUT_KUN_LOCK';
+    else if (spellStageBeforeUpdate !== 'READY') kunFailure = `PUSH_BEFORE_READY_${spellStageBeforeUpdate}`;
+    else if (!spellEvents.some((event) => event.type === 'cast' && event.spell.id === 'KUN_EARTH')) kunFailure = 'PUSH_NOT_CAST';
+    else kunFailure = '—';
+    if (kunFailure !== '—') traceKun('CAST_FAILED', kunFailure, timestamp);
+  }
   if (freshSample) recorder.record(snapshot, spellMotion, qimen.spellSystem.stage, qimen.spellSystem.lockedSector, sampleTimestamp);
   if (qa.session) qa.setEnvironment({
     camera: camera.label,
@@ -422,17 +487,30 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     activeSpell: qimen.spellSystem.activeSpell?.name ?? '—',
   });
   const renderStats = qimen.getPerformanceDebug();
-  debug.updateQa(debug.enabled ? [
+  const rayLocal = rayHit?.hit ? `${rayHit.localX?.toFixed(2)}, ${rayHit.localY?.toFixed(2)}, ${rayHit.localZ?.toFixed(2)}` : '—';
+  const rayAngle = rayHit?.angle === null || rayHit?.angle === undefined ? '—' : `${(rayHit.angle * 180 / Math.PI).toFixed(1)}°`;
+  debug.updateQa(kunQaMode ? [
+    `KUN QA · Candidate ${stabilized.gestureCandidate} · Stable ${stabilized.stableGesture}`,
+    `Open ${snapshot.openPalmScore.toFixed(2)} · Fist ${snapshot.fistScore.toFixed(2)} · Point ${snapshot.pointScore.toFixed(2)} · Pinch ${Math.max(0, 1 - snapshot.normalizedPinchDistance / 0.25).toFixed(2)}`,
+    `Fingers extended ${snapshot.extendedFingerCount}/4 · curled ${snapshot.curledFingerCount}/4 · Fist candidate ${stabilized.fistCandidate ? 'YES' : 'NO'} · confirmed ${confirmedFist ? 'YES' : 'NO'}`,
+    `Ray hit ${rayHit?.hit ? 'YES' : 'NO'} (${rayHit?.reason ?? 'NOT_POINTING'}) · local ${rayLocal} · angle ${rayAngle}`,
+    `Ray sector ${candidateSector === null ? '—' : PALACES[candidateSector]?.name} · confidence ${focusState.confidence.toFixed(2)} · focus ${sectorFocus.focusedSector === null ? '—' : PALACES[sectorFocus.focusedSector]?.name}`,
+    `Lock ${qimen.spellSystem.lockedSector === null ? '—' : PALACES[qimen.spellSystem.lockedSector]?.name} · Spell ${qimen.spellSystem.activeSpell?.id ?? '—'} · ${qimen.spellSystem.stage} · Charge ${(qimen.spellSystem.controller.chargeProgress(timestamp, tuning.values.chargeScale) * 100).toFixed(0)}%`,
+    `PUSH score ${motion.pushScore.toFixed(2)} · evidence ${motion.pushEvidence.toFixed(2)} · Z v ${motion.depthVelocity.toFixed(2)} · scale ${snapshot.handScale.toFixed(3)} · facing ${snapshot.palmFacingCamera ? 'YES' : 'NO'} · age ${Math.max(0, timestamp - sampleTimestamp).toFixed(0)}ms`,
+    `Failure ${kunFailure}`,
+    ...kunTimeline.lines(timestamp).slice(-7),
+  ] : [
     `QA Camera ${camera.active ? 'ON' : 'OFF'} · Hand ${latestFps.toFixed(0)}fps · Render ${qimen.renderFps.toFixed(0)}fps/${qimen.performanceTier}`,
     `Hands ${snapshot.handCount} · Dominant ${dominantHand.preferred} · Gesture ${snapshot.name} · Intent ${spellMotion.action ?? '—'}`,
     `Choreo ${choreography.stage} · GestureState ${stateMachine.state} · Hover ${hoveredPlate ?? '—'} · Focus ${focusState.sector ?? '—'} · Selected ${selectedSector ?? '—'}`,
-    `Scores O:${snapshot.openPalm ? '1.00' : '0.00'} F:${snapshot.fist ? '1.00' : '0.00'} P:${snapshot.pointing ? '1.00' : '0.00'} Pin:${Math.max(0, 1 - snapshot.normalizedPinchDistance / 0.25).toFixed(2)}`,
+    `Scores O:${snapshot.openPalmScore.toFixed(2)} F:${snapshot.fistScore.toFixed(2)} P:${snapshot.pointScore.toFixed(2)} Pin:${Math.max(0, 1 - snapshot.normalizedPinchDistance / 0.25).toFixed(2)} · fingers extended:${snapshot.extendedFingerCount} curled:${snapshot.curledFingerCount}`,
+    `Candidate ${stabilized.gestureCandidate} · Stable ${stabilized.stableGesture} · Ray ${rayHit?.hit ? 'HIT' : rayHit?.reason ?? '—'} local ${rayLocal} angle ${rayAngle} sector ${candidateSector === null ? '—' : PALACES[candidateSector]?.name} confidence ${focusState.confidence.toFixed(2)}`,
     `Motion Push:${motion.pushScore.toFixed(2)} Pull:${motion.pullScore.toFixed(2)} Swipe:${motion.swipeScore.toFixed(2)} Flick:${motion.flickScore.toFixed(2)}`,
     `Swipe consistency:${motion.swipeDirectionConsistency.toFixed(2)} · Grace:${choreographyState.spellPaused ? 'PAUSED' : 'LIVE'} · Buffer:${tuning.values.inputBufferMs}ms`,
     `Sample age:${Math.max(0, timestamp - sampleTimestamp).toFixed(0)}ms · physical Hand/Rotate/Cast latency: unmeasured`,
     `Render draw:${renderStats.drawCalls} tri:${renderStats.triangles} geo:${renderStats.geometries} tex:${renderStats.textures} spell:${renderStats.activeSpellObjects}/${renderStats.pooledSpellObjects}`,
     ...timeline.lines(timestamp),
-  ] : []);
+  ]);
   hud.update(snapshot, latestFps);
   camera.updateDiagnostics();
 }

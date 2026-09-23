@@ -6,6 +6,7 @@ export interface InteractionAdmission {
   manipulation: boolean;
   space: boolean;
   suppressFistCollapse: boolean;
+  lockSector?: boolean;
 }
 
 export type GestureEvent =
@@ -66,7 +67,7 @@ export class GestureStateMachine {
     }
 
     if (this.state === 'SUMMONING') {
-      if (input.fist) {
+      if (input.fist && !admission.suppressFistCollapse) {
         this.state = 'COLLAPSING';
         events.push({ type: 'COLLAPSE' });
       } else if (formationPhase === 'ACTIVE') {
@@ -109,7 +110,7 @@ export class GestureStateMachine {
     }
 
     if (this.state === 'POINTING') {
-      if (input.pinch && !this.lockArmed) {
+      if (input.pinch && admission.lockSector && !this.lockArmed) {
         this.lockArmed = true;
         this.state = 'LOCKING';
         events.push({ type: 'LOCK', snapshot: input });
@@ -140,6 +141,10 @@ export class GestureStateMachine {
       this.state = 'POINTING';
       this.lastPointTimestamp = timestamp;
       events.push({ type: 'POINT', snapshot: input });
+    } else if (input.pinch && admission.lockSector) {
+      this.lockArmed = true;
+      this.state = 'LOCKING';
+      events.push({ type: 'LOCK', snapshot: input });
     } else if (input.pinch && !input.pointing) {
       this.state = 'ROTATING';
       events.push({ type: 'BEGIN_ROTATION' });
