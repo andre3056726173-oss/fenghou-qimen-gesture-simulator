@@ -21,11 +21,11 @@ TypeScript、[Three.js](https://threejs.org/) `0.186.0`、[@mediapipe/tasks-visi
 
 ## 快速开始 / Quick start
 
-需要 Node.js `^20.19.0` 或 `>=22.12.0`、npm 和首次安装时的网络连接。以下 `OWNER/REPO` 是发布后的 GitHub 地址占位符：
+需要 Node.js `^20.19.0` 或 `>=22.12.0`、npm 和首次安装时的网络连接。
 
 ```bash
-git clone https://github.com/OWNER/REPO.git
-cd REPO
+git clone https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
+cd fenghou-qimen-gesture-simulator
 npm install
 npm run dev
 ```

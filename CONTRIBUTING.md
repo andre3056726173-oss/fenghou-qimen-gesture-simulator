@@ -7,8 +7,8 @@
 先 Fork 或 Clone 仓库，使用符合范围的分支名：`feature/*`、`fix/*`、`visual/*`、`gesture/*`、`spell/*`、`performance/*`、`docs/*`。
 
 ```bash
-git clone https://github.com/OWNER/REPO.git
-cd REPO
+git clone https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
+cd fenghou-qimen-gesture-simulator
 git checkout -b fix/example
 npm install
 # 修改并验证
@@ -20,7 +20,7 @@ git commit -m "fix: describe the change"
 git push -u origin fix/example
 ```
 
-然后向项目主分支提交 Pull Request。`OWNER/REPO` 为仓库发布后的地址占位符。推荐提交前缀：`feat:`、`fix:`、`refactor:`、`perf:`、`docs:`、`test:`。PR 请说明动机、改动范围、测试方式；视觉改动可附只包含你有权发布内容的截图或视频。
+然后向项目主分支提交 Pull Request。推荐提交前缀：`feat:`、`fix:`、`refactor:`、`perf:`、`docs:`、`test:`。PR 请说明动机、改动范围、测试方式；视觉改动可附只包含你有权发布内容的截图或视频。
 
 ## 手势参数需要真人证据
 
