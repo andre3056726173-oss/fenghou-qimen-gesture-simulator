@@ -1,6 +1,6 @@
 # Architecture / 架构导览
 
-这是一个 TypeScript + Vite 单页面项目。`src/main.ts` 是运行时编排入口；相机帧、手势和 WebGL 在同一页面协作，但各自有明确状态所有者。深入审计和已知边界见 [ARCHITECTURE_AUDIT.md](../ARCHITECTURE_AUDIT.md)。
+这是一个 TypeScript + Vite 单页面项目。`src/main.ts` 是运行时编排入口；相机帧、手势和 WebGL 在同一页面协作，但各自有明确状态所有者。深入审计和已知边界见 [ARCHITECTURE_AUDIT.md](ARCHITECTURE_AUDIT.md)。
 
 ```text
 Camera <video>

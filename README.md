@@ -13,7 +13,7 @@ A real-time gesture-controlled Qimen formation experiment built with MediaPipe, 
 - 可选个人手势校准、数值录制、真人 QA 记录、性能档位与 Debug 面板。
 - 纯阵局、四术自动演示和无界面 Showcase 模式。
 
-当前手部遮挡接口尚未接入真实分割；实际识别率、延迟和五分钟 GPU 稳定性仍需真人摄像头验收。详见 [Roadmap](ROADMAP.md) 与 [架构审计](ARCHITECTURE_AUDIT.md)。
+当前手部遮挡接口尚未接入真实分割；实际识别率、延迟和五分钟 GPU 稳定性仍需真人摄像头验收。详见 [Roadmap](ROADMAP.md) 与 [架构审计](docs/ARCHITECTURE_AUDIT.md)。
 
 ## 技术栈 / Stack
 
@@ -61,7 +61,7 @@ npm run build
 - 正常摄像头模式加 `?qa=1`，再按 `D` 打开 Debug。`T` 开始/结束最长 60 秒的 QA JSON 会话；`R` 记录最长 10 秒的手势数值 JSON；`C` 运行个人校准。
 - Debug 下数字键 `1`–`4` 是开发用模拟施术，不能用于真人成功率统计。Debug 参数面板中的保存会修改浏览器本地个人参数。
 
-QA JSON 和手势数值记录不包含视频，但可能包含设备信息和手部坐标，默认被 `.gitignore` 排除；分享报告前请自行检查。旧版键盘演示说明不适用于当前版本。
+QA JSON 和手势数值记录不包含视频，但可能包含设备信息和手部坐标，默认被 `.gitignore` 排除；分享报告前请自行检查。
 
 ## 项目结构 / Structure
 
