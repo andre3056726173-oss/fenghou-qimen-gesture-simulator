@@ -67,6 +67,7 @@ QA JSON 和手势数值记录不包含视频，但可能包含设备信息和手
 
 ```text
 src/
+  app/                 摄像头会话与 URL 运行模式
   handTracking/        摄像头帧、MediaPipe、坐标映射
   gestureRecognition/  分类、平滑、状态机、动作与 QA
   qimen/               四盘、宫位、阵局动画及交互几何

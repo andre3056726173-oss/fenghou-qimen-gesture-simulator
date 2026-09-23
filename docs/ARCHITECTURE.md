@@ -19,6 +19,7 @@ Camera <video>
 
 | 目录 | 主要职责 |
 |---|---|
+| `app/` | `CameraSession` 管摄像头的选择、打开、取消与诊断；`runtimeMode` 解析 URL 参数决定的运行模式 |
 | `handTracking/` | 视频源的 MediaPipe 推理、视频帧时间戳、镜像与画面裁剪映射 |
 | `gestureRecognition/` | 手形分类、稳定判定、运动窗口、交互状态、编排、校准与 QA 数值记录 |
 | `qimen/` | 四盘对象、八宫几何、空间盘层、展开/收束与抓盘惯性 |
