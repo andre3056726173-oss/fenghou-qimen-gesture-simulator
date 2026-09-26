@@ -1,8 +1,13 @@
 /** The preview is mirrored like a normal selfie camera. All screen-space consumers use this helper. */
 export const CAMERA_MIRROR_ENABLED = true;
 
-export function screenXFromLandmark(x: number) {
-  return CAMERA_MIRROR_ENABLED ? 1 - x : x;
+export function screenXFromLandmark(x: number, mirror = CAMERA_MIRROR_ENABLED) {
+  return mirror ? 1 - x : x;
+}
+
+/** MotionDetector already mirrors X. Only image Y/depth need conversion for Three.js. */
+export function screenDirectionToSpell(direction: { x: number; y: number; z: number }) {
+  return { x: direction.x, y: -direction.y, z: -direction.z };
 }
 
 let videoWidth = 1280;
