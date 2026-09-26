@@ -9,14 +9,16 @@ export function readRuntimeMode(location: Location = window.location) {
   const showcase = params.get('showcase') === '1';
   const spellDemo = SPELL_DEMO_MODE || params.get('spellDemo') === '1';
   const kunQa = params.get('qa') === 'kun';
+  const kanQa = params.get('qa') === 'kan';
   return {
     showcase,
     showcaseCameraBackground: showcase && params.get('background') === 'camera',
     spellDemo,
     presentationDemo: spellDemo || showcase,
     formationDemo: params.get('demo') === '1' || location.pathname === '/demo',
-    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa,
+    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa || kanQa,
     kunQa,
+    kanQa,
     cameraDebug: params.get('cameraDebug') === '1',
   };
 }

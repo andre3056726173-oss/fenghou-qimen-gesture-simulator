@@ -24,6 +24,11 @@ export interface MotionState {
   swipeDisplacement: number;
   pinchSeparationVelocity: number;
   timestamp: number;
+  /** Read-only components of the unchanged PULL formula. */
+  scaleRate: number;
+  pullZEvidence: number;
+  pullScaleEvidence: number;
+  pullFacingEvidence: number;
 }
 
 interface MotionSample {
@@ -52,7 +57,7 @@ export class GestureMotionDetector {
     const center = snapshot.palmCenter;
     if (!center) {
       this.reset();
-      return { action: null, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 0, holdTime: 0, intensity: 0.75, direction: { x: 0, y: 0, z: 0 }, anticipation: 0, pushScore: 0, pullScore: 0, swipeScore: 0, flickScore: 0, swipeDirectionConsistency: 0, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp };
+      return { action: null, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 0, holdTime: 0, intensity: 0.75, direction: { x: 0, y: 0, z: 0 }, anticipation: 0, pushScore: 0, pullScore: 0, swipeScore: 0, flickScore: 0, swipeDirectionConsistency: 0, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp, scaleRate: 0, pullZEvidence: 0, pullScaleEvidence: 0, pullFacingEvidence: 0 };
     }
     const previous = this.history[this.history.length - 1];
     const dt = Math.max(0.001, (timestamp - (previous?.timestamp ?? timestamp - 16)) / 1000);
@@ -75,7 +80,10 @@ export class GestureMotionDetector {
     const scaleRate = previous ? (snapshot.handScale - previous.handScale) / dt : 0;
     // Webcams give noisy Z. A forward/back gesture uses Z, apparent palm size, wrist speed and facing together.
     const forwardEvidence = Math.max(0, -velocity.z / 0.3) * params.pushZWeight + Math.max(0, scaleRate / 0.22) * params.pushScaleWeight + (snapshot.palmFacingCamera ? params.pushFacingWeight : 0);
-    const pullEvidence = Math.max(0, velocity.z / 0.3) * params.pullZWeight + Math.max(0, -scaleRate / 0.22) * params.pullScaleWeight + (snapshot.palmFacingCamera ? params.pullFacingWeight : 0);
+    const pullZEvidence = Math.max(0, velocity.z / 0.3) * params.pullZWeight;
+    const pullScaleEvidence = Math.max(0, -scaleRate / 0.22) * params.pullScaleWeight;
+    const pullFacingEvidence = snapshot.palmFacingCamera ? params.pullFacingWeight : 0;
+    const pullEvidence = pullZEvidence + pullScaleEvidence + pullFacingEvidence;
     const pinchReleaseSpeed = previous ? (snapshot.normalizedPinchDistance - previous.pinchGap) / dt : 0;
     let pinchStartedAt = previous?.timestamp ?? timestamp;
     for (let i = this.history.length - 2; i >= 0 && this.history[i].pinch; i -= 1) pinchStartedAt = this.history[i].timestamp;
@@ -114,7 +122,7 @@ export class GestureMotionDetector {
     const directionLength = Math.max(0.001, Math.hypot(velocity.x, velocity.y, velocity.z));
     const direction = { x: velocity.x / directionLength, y: velocity.y / directionLength, z: velocity.z / directionLength };
     const anticipation = Math.min(1, Math.max(forwardEvidence, pullEvidence, Math.abs(swipeVelocity) / Math.max(params.swipeThreshold * 2, 0.01), pinchReleaseSpeed / Math.max(params.flickThreshold * 1.6, 0.01)));
-    this.lastOutput = { action, velocity, depthVelocity: velocity.z, swipeVelocity, speed, stableMs, holdTime: stableMs, intensity, direction, anticipation, pushScore, pullScore, swipeScore, flickScore, swipeDirectionConsistency: swipeConsistency, pushEvidence: forwardEvidence, pullEvidence, swipeDisplacement: swipeWindow ? Math.abs(position.x - swipeWindow.position.x) : 0, pinchSeparationVelocity: pinchReleaseSpeed, timestamp };
+    this.lastOutput = { action, velocity, depthVelocity: velocity.z, swipeVelocity, speed, stableMs, holdTime: stableMs, intensity, direction, anticipation, pushScore, pullScore, swipeScore, flickScore, swipeDirectionConsistency: swipeConsistency, pushEvidence: forwardEvidence, pullEvidence, swipeDisplacement: swipeWindow ? Math.abs(position.x - swipeWindow.position.x) : 0, pinchSeparationVelocity: pinchReleaseSpeed, timestamp, scaleRate, pullZEvidence, pullScaleEvidence, pullFacingEvidence };
     return this.lastOutput;
   }
 
