@@ -1,5 +1,6 @@
 import type { GestureSnapshot } from '../types';
 import type { MotionState } from './GestureMotionDetector';
+import type { ZhenFlickStatus } from './ZhenFlickController';
 
 export interface GestureRecord {
   timestamp: number;
@@ -13,6 +14,7 @@ export interface GestureRecord {
   spellState: string;
   sector: number | null;
   confidence: number;
+  zhenFlick?: ZhenFlickStatus;
 }
 
 /** Records numerical landmark/gesture telemetry only — never camera frames. */
@@ -33,7 +35,7 @@ export class GestureDebugRecorder {
     return 'started' as const;
   }
 
-  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number) {
+  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number, zhenFlick?: ZhenFlickStatus) {
     if (!this.recording) return;
     if (timestamp - this.startedAt > 10_000) {
       this.recording = false;
@@ -52,6 +54,7 @@ export class GestureDebugRecorder {
       spellState,
       sector,
       confidence: snapshot.confidence,
+      zhenFlick: zhenFlick ? { ...zhenFlick } : undefined,
     });
   }
 
