@@ -14,6 +14,8 @@ import { SectorFocusController } from './gestureRecognition/SectorFocusControlle
 import { GestureMotionDetector } from './gestureRecognition/GestureMotionDetector';
 import { GestureTuningStore } from './gestureRecognition/GestureTuning';
 import { GestureInputBuffer } from './gestureRecognition/GestureInputBuffer';
+import { XunCastInputController } from './gestureRecognition/XunCastInputController';
+import { XunInteractionTrace } from './ui/XunInteractionTrace';
 import { GesturePriorityResolver } from './gestureRecognition/GesturePriorityResolver';
 import { GestureChoreographyController } from './gestureRecognition/GestureChoreographyController';
 import { GestureDebugRecorder } from './gestureRecognition/GestureDebugRecorder';
@@ -53,6 +55,7 @@ let cachedFocusState = sectorFocus.update(null, 0, false);
 const tuning = new GestureTuningStore();
 const motionDetector = new GestureMotionDetector(tuning);
 const inputBuffer = new GestureInputBuffer();
+const xunCastInput = new XunCastInputController();
 const priorityResolver = new GesturePriorityResolver();
 const choreography = new GestureChoreographyController();
 const recorder = new GestureDebugRecorder();
@@ -89,6 +92,8 @@ const showcaseCameraBackground = mode.showcaseCameraBackground;
 const presentationDemoMode = mode.presentationDemo;
 const realQaMode = mode.realQa;
 const kunQaMode = mode.kunQa;
+const xunQaMode = mode.xunQa;
+const xunTrace = new XunInteractionTrace(xunQaMode);
 const cameraDebugMode = mode.cameraDebug;
 const camera = new CameraSession(video, appEvents.signal, () => disposed);
 const kunTimeline = new InteractionEventTimeline();
@@ -99,7 +104,7 @@ function traceKun(key: string, value: string, timestamp: number) {
   kunTraceEdges.set(key, value);
   kunTimeline.push(timestamp, `${key} ${value}`);
 }
-if (kunQaMode) {
+if (kunQaMode || xunQaMode) {
   debug.toggle(true);
   debugButton.querySelector('span')!.textContent = 'ON';
   qa.setEnabled(true);
@@ -121,6 +126,7 @@ function activateExperience(message: string) {
 function emitSpellEvents(events: SpellControllerEvent[]) {
   events.forEach((event) => {
     if (event.type === 'stage') {
+      if (event.spell?.id === 'XUN_WIND') xunTrace.event('SPELL_STAGE', event.stage, currentInteractionTimestamp);
       if (debug.enabled) timeline.push(currentInteractionTimestamp, `${event.stage}${event.spell ? ` ${event.spell.id}` : ''}`);
       if (event.spell?.id === 'KUN_EARTH') {
         traceKun('SPELL_STAGE', event.stage, currentInteractionTimestamp);
@@ -135,6 +141,7 @@ function emitSpellEvents(events: SpellControllerEvent[]) {
     audioBus.emit('spell_cast');
     if (debug.enabled) timeline.push(currentInteractionTimestamp, `CAST ${event.spell.id}`);
     if (event.spell.id === 'KUN_EARTH') traceKun('CAST', 'KUN_EARTH', currentInteractionTimestamp);
+    if (event.spell.id === 'XUN_WIND') xunTrace.event('CAST', `${event.spell.id} ${event.context.action}`, currentInteractionTimestamp);
     if (!demoMode) qa.success(event.spell.id, Math.max(0, currentInteractionTimestamp - lastActionSampleAt));
     if (event.spell.id === 'KUN_EARTH') audioBus.emit('earth_cast');
     if (event.spell.id === 'XUN_WIND') audioBus.emit('wind_cast');
@@ -156,6 +163,7 @@ const spellDemoDirector = new SpellDemoDirector(qimen, {
 function resetInteractionRuntime() {
   stateMachine.reset(); smoother.reset(); recognizer.reset(); motionDetector.reset(); rotationController.reset();
   choreography.reset(); sectorFocus.reset(); inputBuffer.clear(); sampleGate.reset();
+  xunCastInput.reset(); xunTrace.reset();
   cachedFocusState = sectorFocus.update(null, 0, false);
   selectedSector = null;
   previousFocusedSector = null; previousHoveredPlate = null;
@@ -251,12 +259,12 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     cachedRotation = rotationController.update(snapshot.landmarks[0], sampleTimestamp);
   }
   // Keep temporal state ticking between camera samples, without replaying a release/push event.
-  const motion = freshSample ? cachedMotion : { ...cachedMotion, action: cachedMotion.action === 'HOLD' ? 'HOLD' as const : null };
+  const motion = freshSample ? cachedMotion : { ...cachedMotion, action: cachedMotion.action === 'HOLD' ? 'HOLD' as const : null, swipe: { ...cachedMotion.swipe, action: null } };
   if (stabilized.pointing) inputBuffer.push('POINT', timestamp);
   if (stabilized.pinch) inputBuffer.push('PINCH', timestamp);
   if (stabilized.openPalm) inputBuffer.push('OPEN_PALM', timestamp);
   if (confirmedFist) inputBuffer.push('FIST', timestamp);
-  if (motion.action) inputBuffer.push(motion.action, freshSample ? sampleTimestamp : timestamp, motion.intensity, motion.direction);
+  if (motion.action && !motion.action.startsWith('SWIPE')) inputBuffer.push(motion.action, freshSample ? sampleTimestamp : timestamp, motion.intensity, motion.direction);
   if (freshSample && motion.action && motion.action !== 'HOLD') lastActionSampleAt = sampleTimestamp;
   if (!snapshot.handCount && !handWasMissing) { if (debug.enabled) timeline.push(timestamp, 'HAND_LOST'); qa.lostHand(); }
   if (debug.enabled && snapshot.handCount && handWasMissing) timeline.push(timestamp, 'HAND_REACQUIRED');
@@ -282,6 +290,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   if (choreographyState.cancelSpell) {
     if (qimen.spellSystem.activeSpell) qa.failure(qimen.spellSystem.activeSpell.id, snapshot.handCount ? 'CANCELLED' : 'LOST_HAND');
     emitSpellEvents(qimen.cancelPreparedSpell(timestamp));
+    xunCastInput.reset();
     stateMachine.recoverActive();
     hud.toast('术式撤销 · 阵局仍维持');
   }
@@ -327,10 +336,17 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     kunFailure = 'PINCH_NO_STABLE_KUN_FOCUS';
     traceKun('LOCK_FAILED', kunFailure, timestamp);
   }
-  let spellMotion = motion;
-  if (snapshot.handCount && qimen.spellSystem.stage === 'READY' && (!motion.action || motion.action === 'HOLD')) {
+  const xunInput = xunCastInput.update({ lockedSector: qimen.spellSystem.lockedSector, spellId: qimen.spellSystem.activeSpell?.id ?? null,
+    stage: qimen.spellSystem.stage, formationActive: qimen.animator.phase === 'ACTIVE' }, snapshot, motion, timestamp, freshSample, tuning.values.inputBufferMs);
+  if (freshSample && motion.swipe.action && qimen.spellSystem.lockedSector === 7 && qimen.spellSystem.activeSpell?.id === 'XUN_WIND') {
+    xunTrace.event('SWIPE_OBSERVED', `${motion.swipe.action} @${motion.timestamp.toFixed(0)} ${qimen.spellSystem.stage}`, timestamp);
+  }
+  if (xunInput.sourceTimestamp !== null) xunTrace.event('SWIPE_CONSUMED', `${xunInput.motion.action} @${xunInput.sourceTimestamp.toFixed(0)}`, timestamp);
+  let spellMotion = qimen.spellSystem.activeSpell?.id === 'XUN_WIND' ? xunInput.motion : motion;
+  if (xunInput.sourceTimestamp !== null) lastActionSampleAt = xunInput.sourceTimestamp;
+  if (qimen.spellSystem.activeSpell?.id !== 'XUN_WIND' && snapshot.handCount && qimen.spellSystem.stage === 'READY' && (!motion.action || motion.action === 'HOLD')) {
     const spell = qimen.spellSystem.activeSpell;
-    const accepted: SpellAction[] = spell?.id === 'XUN_WIND' ? ['SWIPE_LEFT', 'SWIPE_RIGHT'] : spell ? [spell.action] : [];
+    const accepted: SpellAction[] = spell ? [spell.action] : [];
     const buffered = inputBuffer.consume(accepted, timestamp, tuning.values.inputBufferMs);
     if (buffered) { spellMotion = { ...motion, action: buffered.intent as SpellAction, intensity: buffered.intensity, direction: buffered.direction ?? motion.direction }; lastActionSampleAt = buffered.timestamp; }
   }
@@ -357,6 +373,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       qimen.summonFromHand(event.snapshot.raw);
       qimen.resetSpellSystem();
       inputBuffer.clear();
+      xunCastInput.reset();
       choreography.reset();
       previousSpellStage = qimen.spellSystem.stage;
       audioBus.emit('summon_start');
@@ -373,6 +390,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       motionDetector.reset();
       qimen.resetSpellSystem();
       inputBuffer.clear();
+      xunCastInput.reset();
       choreography.reset();
       previousSpellStage = qimen.spellSystem.stage;
       hud.toast('握拳 · 阵局收束');
@@ -407,12 +425,14 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       }
     } else if (event.type === 'LOCK') {
       const sector = sectorFocus.focusedSector;
+      xunTrace.event('LOCK_INTENT', sector === 7 ? 'XUN' : sector === null ? 'NO_FOCUS' : PALACES[sector]?.name ?? String(sector), timestamp);
       traceKun('LOCK_INTENT', sector === null ? 'NO_FOCUSED_SECTOR' : PALACES[sector]?.name ?? String(sector), timestamp);
       if (sector !== null) {
         const lockEvents = qimen.lockSpellSector(sector, timestamp);
         if (!lockEvents.length) {
           kunFailure = qimen.animator.phase !== 'ACTIVE' ? 'LOCK_FORMATION_INACTIVE' : 'LOCK_CASTING_OR_COOLDOWN';
           traceKun('LOCK_FAILED', kunFailure, timestamp);
+          xunTrace.event('LOCK_FAILED', kunFailure, timestamp);
           return;
         }
         selectedSector = sector;
@@ -423,6 +443,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
         sectorFocus.lock(sector);
         qimen.formation.activate(sector, 1);
         inputBuffer.clear();
+        xunCastInput.reset();
         emitSpellEvents(lockEvents);
         audioBus.emit('sector_lock');
         hud.setPalace(PALACES[sector], true);
@@ -489,7 +510,12 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   const renderStats = qimen.getPerformanceDebug();
   const rayLocal = rayHit?.hit ? `${rayHit.localX?.toFixed(2)}, ${rayHit.localY?.toFixed(2)}, ${rayHit.localZ?.toFixed(2)}` : '—';
   const rayAngle = rayHit?.angle === null || rayHit?.angle === undefined ? '—' : `${(rayHit.angle * 180 / Math.PI).toFixed(1)}°`;
-  debug.updateQa(kunQaMode ? [
+  debug.updateQa(xunQaMode ? xunTrace.lines({ timestamp, hasHand: snapshot.handCount > 0,
+    candidate: stabilized.gestureCandidate, stable: stabilized.stableGesture, pinch: stabilized.pinch, ray: rayHit,
+    focused: sectorFocus.focusedSector, locked: qimen.spellSystem.lockedSector, spell: qimen.spellSystem.activeSpell?.id ?? null,
+    stage: qimen.spellSystem.stage, charge: qimen.spellSystem.controller.chargeProgress(timestamp, tuning.values.chargeScale),
+    motion, threshold: tuning.values.swipeThreshold, input: xunInput, cast: spellEvents.some(event => event.type === 'cast' && event.spell.id === 'XUN_WIND'),
+  }) : kunQaMode ? [
     `KUN QA · Candidate ${stabilized.gestureCandidate} · Stable ${stabilized.stableGesture}`,
     `Open ${snapshot.openPalmScore.toFixed(2)} · Fist ${snapshot.fistScore.toFixed(2)} · Point ${snapshot.pointScore.toFixed(2)} · Pinch ${Math.max(0, 1 - snapshot.normalizedPinchDistance / 0.25).toFixed(2)}`,
     `Fingers extended ${snapshot.extendedFingerCount}/4 · curled ${snapshot.curledFingerCount}/4 · Fist candidate ${stabilized.fistCandidate ? 'YES' : 'NO'} · confirmed ${confirmedFist ? 'YES' : 'NO'}`,
@@ -525,7 +551,7 @@ function loop(timestamp: number) {
   if (freshSample) {
     const primary = frame.hands[0]?.handedness ?? null;
     if (primary && lastPrimaryHand && primary !== lastPrimaryHand) {
-      recognizer.reset(); motionDetector.reset(); rotationController.reset(); smoother.reset(); inputBuffer.clear();
+      recognizer.reset(); motionDetector.reset(); rotationController.reset(); smoother.reset(); inputBuffer.clear(); xunCastInput.reset();
     }
     if (primary) lastPrimaryHand = primary;
     cachedSnapshot = recognizer.update(frame);

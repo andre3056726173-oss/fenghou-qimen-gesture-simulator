@@ -12,6 +12,16 @@ export class EnergyFlow {
   private phase = 0;
   private activeSector: number | null = null;
   private readonly sample = new THREE.Vector3();
+  private readonly windBias = new THREE.Vector3();
+  private readonly targetWindBias = new THREE.Vector3();
+  private readonly inverseRotation = new THREE.Quaternion();
+
+  /** Lean the existing qi points toward screen-left/right; keep both path endpoints anchored. */
+  setWindAnticipation(screenDirection: number, strength: number) {
+    this.group.updateWorldMatrix(true, false);
+    this.group.getWorldQuaternion(this.inverseRotation).invert();
+    this.targetWindBias.set(screenDirection * THREE.MathUtils.clamp(strength, 0, 1) * .08, 0, 0).applyQuaternion(this.inverseRotation);
+  }
 
   constructor() {
     this.group.name = 'energyFlow';
@@ -50,6 +60,7 @@ export class EnergyFlow {
   }
 
   update(delta: number, elapsed: number) {
+    this.windBias.lerp(this.targetWindBias, Math.min(1, delta * 12));
     this.activeProgress += (this.targetProgress - this.activeProgress) * Math.min(1, delta * 5.2);
     const visible = this.activeProgress > 0.002 && this.path.length > 1;
     this.line.visible = visible;
@@ -66,7 +77,8 @@ export class EnergyFlow {
       const t = (i / 36 + this.phase * 0.08) % 1;
       const point = this.samplePath(t);
       const wobble = Math.sin(elapsed * 1.8 + i * 0.7) * 0.015 * this.activeProgress;
-      this.positionAttribute.setXYZ(i, point.x, point.y + wobble, point.z);
+      const bias = Math.sin(Math.PI * t);
+      this.positionAttribute.setXYZ(i, point.x + this.windBias.x * bias, point.y + wobble + this.windBias.y * bias, point.z + this.windBias.z * bias);
     }
     this.positionAttribute.needsUpdate = true;
   }
@@ -75,6 +87,7 @@ export class EnergyFlow {
     this.activeProgress = 0;
     this.targetProgress = 0;
     this.activeSector = null;
+    this.windBias.set(0, 0, 0); this.targetWindBias.set(0, 0, 0);
     this.line.visible = false;
     this.points.visible = false;
   }

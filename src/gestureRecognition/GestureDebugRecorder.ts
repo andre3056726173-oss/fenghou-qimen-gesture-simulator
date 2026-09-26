@@ -1,5 +1,6 @@
 import type { GestureSnapshot } from '../types';
 import type { MotionState } from './GestureMotionDetector';
+import type { SwipeState } from './HandSwipeDetector';
 
 export interface GestureRecord {
   timestamp: number;
@@ -13,6 +14,7 @@ export interface GestureRecord {
   spellState: string;
   sector: number | null;
   confidence: number;
+  swipe: SwipeState;
 }
 
 /** Records numerical landmark/gesture telemetry only — never camera frames. */
@@ -52,6 +54,7 @@ export class GestureDebugRecorder {
       spellState,
       sector,
       confidence: snapshot.confidence,
+      swipe: { ...motion.swipe },
     });
   }
 

@@ -7,6 +7,8 @@ import { SpellCastController, type SpellControllerEvent } from './SpellCastContr
 import { SpellCameraEffects, type CameraImpulseTarget } from './SpellCameraEffects';
 import { SpellVisuals } from './SpellVisuals';
 import type { VisualQualitySettings } from '../threeScene/VisualQualityConfig';
+import { screenDirectionToSpell } from '../handTracking/CameraCoordinates';
+import { emptySwipe } from '../gestureRecognition/HandSwipeDetector';
 
 export class SpellSystem {
   readonly group = new THREE.Group();
@@ -15,6 +17,7 @@ export class SpellSystem {
   private readonly cameraEffects: SpellCameraEffects;
   private followUntil = 0;
   private followSpell: SpellId | null = null;
+  private windDirection = 1;
 
   constructor(private readonly formation: QimenFormation, camera: CameraImpulseTarget) {
     this.group.name = 'spellSystemRoot';
@@ -55,8 +58,12 @@ export class SpellSystem {
       this.formation.prepareSpell(this.controller.lockedSector ?? 0, progress);
     } else this.formation.clearSpellPreparation();
     this.visuals.setAnticipation(this.stage === 'READY' ? motion.anticipation : 0);
+    const windReady = spell === 'XUN_WIND' && this.stage === 'READY';
+    this.formation.energyFlow.setWindAnticipation(windReady ? Math.sign(motion.swipe.horizontal) : 0, windReady ? motion.swipe.score : 0);
     if (this.followSpell && timestamp < this.followUntil) {
-      this.visuals.applyFollowThrough(new THREE.Vector3(motion.direction.x, -motion.direction.y, -motion.direction.z), motion.intensity, this.followSpell);
+      const direction = screenDirectionToSpell(motion.direction);
+      if (this.followSpell === 'XUN_WIND') direction.x = this.windDirection * Math.max(0, direction.x * this.windDirection);
+      this.visuals.applyFollowThrough(new THREE.Vector3(direction.x, direction.y, direction.z), motion.intensity, this.followSpell);
     }
     events.forEach((event) => {
       if (event.type === 'cast') {
@@ -65,6 +72,7 @@ export class SpellSystem {
         this.visuals.cast(event.spell.id, event.context, this.formation);
         this.cameraEffects.trigger(event.spell.id as SpellId);
         this.followSpell = event.spell.id;
+        if (event.spell.id === 'XUN_WIND') this.windDirection = event.context.castDirection.x < 0 ? -1 : 1;
         this.followUntil = timestamp + (event.spell.id === 'ZHEN_LIGHTNING' ? 90 : 210);
       }
     });
@@ -104,7 +112,7 @@ export class SpellSystem {
       castDirection: direction,
       chargeScale: 1,
     };
-    const motion: MotionState = { action, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 500, holdTime: 500, intensity: 1, direction, anticipation: 1, pushScore: 1, pullScore: 1, swipeScore: 1, flickScore: 1, swipeDirectionConsistency: 1, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp };
+    const motion: MotionState = { action, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 500, holdTime: 500, intensity: 1, direction, anticipation: 1, pushScore: 1, pullScore: 1, swipeScore: 1, flickScore: 1, swipeDirectionConsistency: 1, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp, swipe: emptySwipe() };
     return this.update(context, motion, timestamp, 0, timestamp / 1000, null);
   }
 
@@ -113,6 +121,7 @@ export class SpellSystem {
     this.visuals.setPalmSeal(null, null, false, 0);
     this.followSpell = null;
     this.followUntil = 0;
+    this.formation.energyFlow.setWindAnticipation(0, 0);
   }
 
   dispose() { this.reset(); this.visuals.dispose(); this.group.removeFromParent(); }

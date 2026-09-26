@@ -12,7 +12,7 @@ import { PerformanceGovernor, type PerformanceTier } from './PerformanceGovernor
 import { HandOcclusionSystem } from './HandOcclusionSystem';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { VISUAL_QUALITY, qualityFromPerformanceTier, type VisualQualityLevel } from './VisualQualityConfig';
-import { landmarkToViewport } from '../handTracking/CameraCoordinates';
+import { landmarkToViewport, screenDirectionToSpell } from '../handTracking/CameraCoordinates';
 import { FORMATION_STYLE, FRONT_FORMATION_CENTER, FRONT_MAX_SPACE_SCALE, FRONT_MIN_SPACE_SCALE } from '../qimen/FormationStyle';
 import { intersectPlateLocal, sectorFromLocalPoint } from '../qimen/FormationPicking';
 import { disposeObjectTrees } from './ResourceLifecycle';
@@ -192,7 +192,7 @@ export class QimenScene {
       castStage: this.spellSystem.stage,
       action: motion.action,
       castIntensity: motion.intensity,
-      castDirection: { x: motion.direction.x, y: -motion.direction.y, z: -motion.direction.z },
+      castDirection: screenDirectionToSpell(motion.direction),
       chargeScale,
       handSnapshot: snapshot,
     };
