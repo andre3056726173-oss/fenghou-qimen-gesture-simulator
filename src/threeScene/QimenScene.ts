@@ -245,6 +245,7 @@ export class QimenScene {
 
   updateRotationTether(snapshot: GestureSnapshot, rotating: boolean, plateIndex: number | null = null) {
     this.tetherTargetOpacity = rotating && snapshot.landmarks.length ? 0.35 : 0;
+    this.tetherLines.forEach((line, i) => (line.material as THREE.LineBasicMaterial).color.setHex(i === 1 ? 0xd8b562 : 0x8adbc7));
     if (!snapshot.landmarks.length) return;
     this.formation.group.updateMatrixWorld(true);
     const points = snapshot.landmarks[0];
@@ -261,6 +262,26 @@ export class QimenScene {
       attr.setXYZ(0, source.x, source.y, source.z);
       attr.setXYZ(1, target.x, target.y, target.z);
       attr.needsUpdate = true;
+    }
+  }
+
+  /** Functional armed cue; reuses the three existing tether segments, no new GPU resources. */
+  updateZhenFlickFeedback(snapshot: GestureSnapshot, armed: boolean) {
+    const points = snapshot.landmarks[0];
+    if (!armed || !points || points.length !== 21) return;
+    this.tetherTargetOpacity = 0.45;
+    const thumb = this.spacePoint(points[4].x, points[4].y, points[4].z);
+    const index = this.spacePoint(points[8].x, points[8].y, points[8].z);
+    for (let i = 0; i < 3; i += 1) {
+      const attr = this.tetherLines[i].geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let end = 0; end < 2; end += 1) {
+        const t = (i + end) / 3;
+        attr.setXYZ(end, thumb.x + (index.x - thumb.x) * t,
+          thumb.y + (index.y - thumb.y) * t + Math.sin(t * Math.PI * 3) * 0.018,
+          thumb.z + (index.z - thumb.z) * t);
+      }
+      attr.needsUpdate = true;
+      (this.tetherLines[i].material as THREE.LineBasicMaterial).color.setHex(0xd5eaff);
     }
   }
 
