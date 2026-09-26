@@ -6,8 +6,8 @@ export type GesturePriority = 'COLLAPSE' | 'CAST' | 'LOCK' | 'SPELL_ARM' | 'ROTA
 export class GesturePriorityResolver {
   resolve(options: { fist: boolean; spellStage: SpellCastStage; motion: MotionState; locking: boolean; spellArming?: boolean; rotating: boolean; pointing: boolean; spaceGesture: boolean }): GesturePriority {
     if (options.fist) return 'COLLAPSE';
-    if (options.spellStage === 'READY' && options.motion.action && options.motion.action !== 'HOLD') return 'CAST';
     if (options.locking) return 'LOCK';
+    if (options.spellStage === 'READY' && options.motion.action && options.motion.action !== 'HOLD') return 'CAST';
     if (options.spellArming) return 'SPELL_ARM';
     if (options.rotating) return 'ROTATE';
     if (options.pointing) return 'TARGET';

@@ -72,6 +72,9 @@ npm run dev
 - `?qa=zhen`：自动打开震术诊断，观察锁宫 PINCH 消费、新 PINCH、指尖分离速度、FLICK 周期状态及失败原因；按 `R` 下载数值记录，不保存视频。
 
 - `?qa=kan`：自动打开坎术诊断，显示锁宫周期消费、READY Neutral、回拉证据分量、Candidate／Confirmed 和失败时间线；按 `R` 保存数值记录，不保存视频。
+- `?qa=spells`：四术整合诊断，显示当前锁宫／术式、四种动作 Score、统一 Cast Gate、Neutral／Armed／Candidate／Confirmed／Cooldown、新摄像头样本、输入缓冲及失败时间线。
+
+四术都只接受 READY 后的新施术动作。锁宫后完全松开；坤／巽／坎先张掌稳定片刻再推／扫／拉，震须重新捏合蓄势再弹开。READY 前动作不再通过输入缓冲延后释放。默认动作阈值未修改。
 
 
 导出的 JSON 不含视频，但可能有设备信息和手部坐标，分享前请检查。

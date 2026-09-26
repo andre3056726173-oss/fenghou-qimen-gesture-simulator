@@ -13,6 +13,7 @@ export function readRuntimeMode(location: Location = window.location) {
   const zhenQa = params.get('qa') === 'zhen';
 
   const kanQa = params.get('qa') === 'kan';
+  const spellsQa = params.get('qa') === 'spells';
 
   return {
     showcase,
@@ -20,11 +21,12 @@ export function readRuntimeMode(location: Location = window.location) {
     spellDemo,
     presentationDemo: spellDemo || showcase,
     formationDemo: params.get('demo') === '1' || location.pathname === '/demo',
-    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa || xunQa || zhenQa || kanQa,
+    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa || xunQa || zhenQa || kanQa || spellsQa,
     kunQa,
     xunQa,
     zhenQa,
     kanQa,
+    spellsQa,
 
     cameraDebug: params.get('cameraDebug') === '1',
   };

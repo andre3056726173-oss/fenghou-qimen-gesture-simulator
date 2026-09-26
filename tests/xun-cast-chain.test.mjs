@@ -45,10 +45,22 @@ function stroke(sign = 1, start = 1500, noiseZ = false) {
   assert.fail('short swipe was not recognized');
 }
 
+
+function readySwipe(input, c, s, m) {
+  const still = detector().update(snap(), m.timestamp - 260);
+  for (let t = m.timestamp - 260; t < m.timestamp; t += 20) {
+    input.update(gate(c), snap(), { ...still, timestamp: t }, t, true, 360);
+  }
+  const candidate = input.update(gate(c), s, m, m.timestamp, true, 360);
+  assert.equal(candidate.motion.action, null);
+  const continued = { ...m, timestamp: m.timestamp + 20, action: null, swipe: { ...m.swipe, action: null } };
+  return input.update(gate(c), s, continued, continued.timestamp, true, 360);
+}
+
 for (const [label, sign] of [['LEFT', -1], ['RIGHT', 1]]) {
   test(`XUN LOCKED + READY + natural ${label} swipe casts in that screen direction`, () => {
     const c = prepared(), input = new XunCastInputController(), { m, s } = stroke(sign);
-    const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+    const result = readySwipe(input, c, s, m);
     assert.equal(result.motion.action, `SWIPE_${label}`);
     const events = c.update(ctx(result.motion), m.timestamp);
     const cast = events.find(e => e.type === 'cast');
@@ -83,47 +95,41 @@ test('unlocked XUN cannot buffer or cast a swipe that later leaks into READY', (
   assert.equal(input.update(gate(c), s, duplicate, m.timestamp + 3, false, 360).motion.action, null);
 });
 
-test('XUN charging swipe is deferred, then consumed once within the unchanged 360ms buffer', () => {
+test('Phase 4.100: pre-READY swipe is discarded even inside the 360ms intent window', () => {
   const c = prepared(false), input = new XunCastInputController(), { m, s } = stroke(1, 1000);
-  const early = input.update(gate(c), s, m, m.timestamp, true, 360);
-  assert.equal(early.motion.action, null);
-  assert.ok(!c.update(ctx(early.motion), m.timestamp).some(e => e.type === 'cast'));
-  c.update(ctx(early.motion), 1450); assert.equal(c.stage, 'READY');
-  const duplicate = { ...m, action: null, swipe: { ...m.swipe, action: null } };
-  const result = input.update(gate(c), s, duplicate, 1451, false, 360);
-  assert.equal(result.sourceTimestamp, m.timestamp);
-  assert.equal(result.motion.action, 'SWIPE_RIGHT');
-  assert.equal(result.buffered, true);
-  assert.ok(c.update(ctx(result.motion), 1451).some(e => e.type === 'cast'));
-  assert.equal(input.update(gate(c), s, duplicate, 1452, false, 360).motion.action, null);
+  assert.equal(input.update(gate(c), s, m, m.timestamp, true, 360).motion.action, null);
+  c.forceReady(7, wind, m.timestamp + 20);
+  for (const fresh of [false, true]) {
+    const result = input.update(gate(c), s, { ...m, action: null, swipe: { ...m.swipe, action: null } }, m.timestamp + 40, fresh, 360);
+    assert.equal(result.sourceTimestamp, null); assert.equal(result.buffered, false);
+    assert.equal(result.motion.action, null);
+    assert.ok(!c.update(ctx(result.motion), m.timestamp + 40).some(e => e.type === 'cast'));
+  }
 });
 
-test('an expired pre-READY swipe cannot cast', () => {
+test('old and expired pre-READY swipes cannot cast', () => {
   const c = prepared(false), input = new XunCastInputController(), { m, s } = stroke(1, 1000);
   input.update(gate(c), s, m, m.timestamp, true, 360);
-  c.update(ctx(m), 1500);
-  const result = input.update(gate(c), s, { ...m, action: null, swipe: { ...m.swipe, action: null } }, m.timestamp + 361, false, 360);
-  assert.equal(result.failure, 'BUFFER_EXPIRED'); assert.equal(result.motion.action, null);
-  assert.ok(!c.update(ctx(result.motion), m.timestamp + 361).some(e => e.type === 'cast'));
+  c.forceReady(7, wind, m.timestamp + 361);
+  const result = input.update(gate(c), s, { ...m, action: null, swipe: { ...m.swipe, action: null } }, m.timestamp + 361, true, 360);
+  assert.equal(result.motion.action, null); assert.equal(result.sourceTimestamp, null);
 });
 
-test('depth-noise PUSH cannot steal an independently valid XUN swipe or buffered cast', () => {
+test('depth-noise PUSH cannot steal a new post-READY independently valid XUN swipe', () => {
   const c = prepared(), input = new XunCastInputController(), { m, s } = stroke(-1, 1500, true);
   assert.equal(m.action, 'PUSH'); assert.equal(m.swipe.action, 'SWIPE_LEFT');
-  const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+  const result = readySwipe(input, c, s, m);
   assert.equal(result.motion.action, 'SWIPE_LEFT');
   assert.ok(c.update(ctx(result.motion), m.timestamp).some(e => e.type === 'cast'));
 });
 
-test('a valid queued swipe is consumed even when the READY frame is labelled PUSH', () => {
+test('pre-READY swipe cannot leak through a READY frame labelled PUSH', () => {
   const c = prepared(false), input = new XunCastInputController(), { m, s } = stroke(-1, 1000);
   input.update(gate(c), s, m, m.timestamp, true, 360);
-  c.update(ctx(m), 1450);
-  const noisy = { ...m, timestamp: 1451, action: 'PUSH', swipe: { ...m.swipe, action: null }, direction: { x: 0, y: 0, z: -1 } };
-  const result = input.update(gate(c), s, noisy, 1451, true, 360);
-  assert.equal(result.motion.action, 'SWIPE_LEFT'); assert.equal(result.motion.direction.x, -1);
-  assert.equal(result.sourceTimestamp, m.timestamp);
-  assert.ok(c.update(ctx(result.motion), 1451).some(e => e.type === 'cast'));
+  c.forceReady(7, wind, m.timestamp + 20);
+  const noisy = { ...m, timestamp: m.timestamp + 40, action: 'PUSH', swipe: { ...m.swipe, action: null } };
+  const result = input.update(gate(c), s, noisy, noisy.timestamp, true, 360);
+  assert.equal(result.motion.action, null); assert.equal(result.sourceTimestamp, null);
 });
 
 test('vertical zigzags are rejected even if their final Y displacement cancels out', () => {
@@ -181,7 +187,7 @@ test('mirroring happens once: raw camera X, screen X and spell X agree', () => {
   for (const sign of [-1, 1]) {
     const { m, s } = stroke(sign);
     const input = new XunCastInputController(), c = prepared();
-    const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+    const result = readySwipe(input, c, s, m);
     assert.equal(screenDirectionToSpell(result.motion.direction).x, sign);
   }
 });
@@ -196,15 +202,16 @@ test('moving, rotating, splitting and scaling the real front plate still maps it
   assert.ok(local); assert.equal(sectorFromLocalPoint(local.x, local.z), 7);
 });
 
-test('POINT XUN + PINCH stays LOCK; READY swipe outranks grab, scale, rotation and targeting', () => {
+test('POINT XUN + PINCH stays LOCK; LOCK outranks casting; READY swipe otherwise outranks grab, scale and rotation', () => {
   const focus = new SectorFocusController(), machine = new GestureStateMachine(); machine.state = 'ACTIVE';
   focus.update(7, 1000, true); focus.update(7, 1160, true); focus.update(null, 1280, false);
   const stabilized = { raw: snap(), openPalm: false, fist: false, pointing: false, pinch: true, twoHandsOpen: false, twoHandsPinch: false };
   assert.equal(machine.update(stabilized, 'ACTIVE', 1280, 0, { manipulation: true, space: true, suppressFistCollapse: false, lockSector: focus.focusedSector === 7 })[0].type, 'LOCK');
   const c = prepared(), input = new XunCastInputController(), { m, s } = stroke();
-  const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+  const result = readySwipe(input, c, s, m);
   const priority = new GesturePriorityResolver().resolve({ fist: false, spellStage: 'READY', motion: result.motion, locking: true, rotating: true, pointing: true, spaceGesture: true });
-  assert.equal(priority, 'CAST');
+  assert.equal(priority, 'LOCK');
+  assert.equal(new GesturePriorityResolver().resolve({ fist: false, spellStage: 'READY', motion: result.motion, locking: false, rotating: true, pointing: true, spaceGesture: true }), 'CAST');
   assert.deepEqual(machine.update({ ...stabilized, twoHandsPinch: true }, 'ACTIVE', m.timestamp, 2, { manipulation: false, space: false, suppressFistCollapse: false }), []);
 });
 
@@ -213,7 +220,7 @@ test('wind ribbons start at XUN and all travel in the accepted direction', () =>
   formation.group.updateMatrixWorld(true);
   for (const sign of [-1, 1]) {
     const { m, s } = stroke(sign), c = prepared(), input = new XunCastInputController();
-    const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+    const result = readySwipe(input, c, s, m);
     visuals.cast('XUN_WIND', ctx(result.motion), formation);
     const ribbons = visuals.active.filter(item => item.poolKey === 'XUN_WIND:ribbon');
     const anchor = formation.sectorWorldPoint(7);
@@ -232,7 +239,7 @@ test('wind ribbons start at XUN and all travel in the accepted direction', () =>
 test('wind follow-through cannot reverse the cast direction on a trailing hand recoil', () => {
   const formation = new QimenFormation(), system = new SpellSystem(formation, { pulse() {} });
   const { m, s } = stroke(1), c = prepared(), input = new XunCastInputController();
-  const result = input.update(gate(c), s, m, m.timestamp, true, 360);
+  const result = readySwipe(input, c, s, m);
   system.controller.forceReady(7, wind, m.timestamp);
   system.update(ctx(result.motion), result.motion, m.timestamp, 0, 0, null);
   const ribbons = system.visuals.active.filter(item => item.poolKey === 'XUN_WIND:ribbon');
