@@ -12,16 +12,19 @@ export function readRuntimeMode(location: Location = window.location) {
   const xunQa = params.get('qa') === 'xun';
   const zhenQa = params.get('qa') === 'zhen';
 
+  const kanQa = params.get('qa') === 'kan';
+
   return {
     showcase,
     showcaseCameraBackground: showcase && params.get('background') === 'camera',
     spellDemo,
     presentationDemo: spellDemo || showcase,
     formationDemo: params.get('demo') === '1' || location.pathname === '/demo',
-    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa || xunQa || zhenQa,
+    realQa: REAL_QA_MODE || params.get('qa') === '1' || kunQa || xunQa || zhenQa || kanQa,
     kunQa,
     xunQa,
     zhenQa,
+    kanQa,
 
     cameraDebug: params.get('cameraDebug') === '1',
   };

@@ -15,7 +15,8 @@
 | `PUSH` 轻推掌 | 坤宫已锁定且术式 READY 时，触发土术 |
 | `SWIPE_LEFT` / `SWIPE_RIGHT` 横扫 | 巽宫已锁定且 READY 时，风流沿挥动方向释放 |
 | `FLICK` 新捏合保持后快速分指 | 震宫锁定后先完全松开；READY 后重新捏合、保持，再快速弹开。锁宫松手、拨盘松手和单纯移动手掌不算施术 |
-| `PULL` 向身体回拉 | 坎宫已锁定且 READY 时触发水术回流 |
+| `PULL` 向身体回拉 | 指坎、PINCH 锁宫、完全松开，等 READY 并稳定张掌，再主动轻拉；锁宫自然收手不算施术 |
+
 
 一只手足以完成张掌召阵 → 捏合拨盘 → 指向定宫 → 蓄势与施术 → 握拳收阵。双手操作是额外的空间控制。定宫后系统依次进入准备、对位、蓄势、READY；在 READY 前做出发动动作可能不会触发。施术后有短冷却，阵局无需反复关闭。
 
@@ -40,3 +41,14 @@ Debug 数字键 `1`–`4` 只用于视觉模拟，不验证摄像头手势。未
 诊断显示 Candidate／Stable、Focus／Lock、Spell／Charge、PINCH edge、Lock Consumed、FLICK 状态、分离速度、拇指／食指相对手腕的速度、手速、Score、Fresh Sample、Cast Gate 和失败时间线。按 `R` 保存相同的数值证据。`flickThreshold=1.1` 保持不变，单位是归一化指间距离／秒，**不是 0～1 Score 的阈值**；个人校准可能覆盖默认值。PUSH、PULL、SWIPE 参数不受本阶段影响。
 
 真人验收请分别检查：第一次锁宫松开不放雷；第二次捏合能 Armed；慢松开、拨盘松手、丢手不放雷；快速弹开只放一次。自动测试验证逻辑与合成轨迹，不替代真实摄像头成功率。
+## 坎术真人链 / KAN Pull
+
+打开 `?qa=kan`，用一只手完成：指坎并等待 Focus → PINCH 锁宫 → 完全松开且结束 POINT → 等 `KAN_WATER READY` → 张掌稳定一下 → 朝自己身体方向主动轻拉。
+
+锁宫之后的自然收手会被消费，READY 前的 PULL 不缓存；READY 出现时若仍在回拉，也必须先重新稳定。READY 后的 Neutral 需要稳定张掌至少 120ms，没有 PINCH／POINT／拨盘／双手空间操作，速度和回拉证据均处于低位。只有随后新产生的 PULL edge 才进入 Candidate，下一新摄像头样本确认后释放；数据间隔超过 120ms、丢手或失败确认都必须重新 Neutral。一次回拉只释放一次。
+
+诊断显示锁宫周期、READY Neutral、PULL 状态、Fresh Sample、Z 速度、手掌尺度及变化率、Z／Scale／Facing 证据、融合 evidence／score、方向一致性和 Cast Gate。按 `R` 下载数值记录，其中 `kanPull` 字段包含同一组关键诊断，不保存视频。
+
+默认 `pullThreshold=0.42`、Z／Scale／Facing 权重 `0.56／0.30／0.14` 保持不变；Facing 不能单独施术。Scale 必须持续缩小，侧移、明显旋转或形状改变会解除准备；单帧 Z 或 Scale 异常不能完成确认。MediaPipe Z 是相对手腕的深度，**不是手到镜头的绝对距离**：较大的值代表相对更远，当前 PULL 正向为 `depthVelocity > 0`，但整只手回拉未必有同幅度的 Z 变化，因此也允许经确认的尺度缩小证据。[官方坐标定义](https://developers.google.cn/edge/mediapipe/solutions/vision/hand_landmarker/web_js)
+
+目标是真人轻拉约 5～15cm，而不是大幅抽回手臂；自动测试只能验证状态链和合成轨迹，实际距离与成功率仍待真实摄像头验收。请分别测试锁宫自然收手、READY 前回拉、READY 后轻拉、侧移、慢转手掌、短暂丢手，以及持续回拉只释放一次。

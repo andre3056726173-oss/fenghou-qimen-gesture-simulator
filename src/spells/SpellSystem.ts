@@ -112,7 +112,8 @@ export class SpellSystem {
       castDirection: direction,
       chargeScale: 1,
     };
-    const motion: MotionState = { action, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 500, holdTime: 500, intensity: 1, direction, anticipation: 1, pushScore: 1, pullScore: 1, swipeScore: 1, flickScore: 1, swipeDirectionConsistency: 1, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp, swipe: emptySwipe() };
+    const motion: MotionState = { action, velocity: { x: 0, y: 0, z: 0 }, depthVelocity: 0, swipeVelocity: 0, speed: 0, stableMs: 500, holdTime: 500, intensity: 1, direction, anticipation: 1, pushScore: 1, pullScore: 1, swipeScore: 1, flickScore: 1, swipeDirectionConsistency: 1, pushEvidence: 0, pullEvidence: 0, swipeDisplacement: 0, pinchSeparationVelocity: 0, timestamp, swipe: emptySwipe(), scaleRate: 0, pullZEvidence: 0, pullScaleEvidence: 0, pullFacingEvidence: 0 };
+
     return this.update(context, motion, timestamp, 0, timestamp / 1000, null);
   }
 

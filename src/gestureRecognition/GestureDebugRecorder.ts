@@ -3,6 +3,8 @@ import type { MotionState } from './GestureMotionDetector';
 import type { SwipeState } from './HandSwipeDetector';
 import type { ZhenFlickStatus } from './ZhenFlickController';
 
+import type { KanPullStatus } from './KanPullController';
+
 
 export interface GestureRecord {
   timestamp: number;
@@ -18,6 +20,8 @@ export interface GestureRecord {
   confidence: number;
   swipe: SwipeState;
   zhenFlick?: ZhenFlickStatus;
+
+  kanPull?: KanPullStatus;
 
 }
 
@@ -39,7 +43,10 @@ export class GestureDebugRecorder {
     return 'started' as const;
   }
 
-  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number, zhenFlick?: ZhenFlickStatus) {
+  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number, diagnostic?: ZhenFlickStatus | KanPullStatus, kanPull?: KanPullStatus) {
+    const zhenFlick = diagnostic && 'stage' in diagnostic ? diagnostic : undefined;
+    kanPull ??= diagnostic && 'kanPullState' in diagnostic ? diagnostic : undefined;
+
     if (!this.recording) return;
     if (timestamp - this.startedAt > 10_000) {
       this.recording = false;
@@ -60,6 +67,8 @@ export class GestureDebugRecorder {
       confidence: snapshot.confidence,
       swipe: { ...motion.swipe },
       zhenFlick: zhenFlick ? { ...zhenFlick } : undefined,
+
+      kanPull: kanPull ? { ...kanPull } : undefined,
 
     });
   }
