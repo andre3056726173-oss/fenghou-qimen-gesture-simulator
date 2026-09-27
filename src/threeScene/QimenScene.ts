@@ -17,6 +17,12 @@ import { FORMATION_STYLE, FRONT_FORMATION_CENTER, FRONT_MAX_SPACE_SCALE, FRONT_M
 import { intersectPlateLocal, sectorFromLocalPoint } from '../qimen/FormationPicking';
 import { disposeObjectTrees } from './ResourceLifecycle';
 
+export interface FormationAimHit {
+  hit: boolean; sector: number | null; localX: number | null; localY: number | null;
+  localZ: number | null; angle: number | null; reason: string;
+  rawSector?: number; boundaryDistance?: number; aimSpeed?: number;
+}
+
 /** Chest-front floating formation stage. Hand landmarks are projected into this space, never onto a floor. */
 export class QimenScene {
   readonly scene = new THREE.Scene();
@@ -42,6 +48,11 @@ export class QimenScene {
   private tetherOpacity = 0;
   private tetherTargetOpacity = 0;
   private stablePointingSector: number | null = null;
+  private readonly aimCursor = new THREE.Mesh(new THREE.RingGeometry(0.045, 0.07, 24),
+    new THREE.MeshBasicMaterial({ color: 0xc9efe4, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+  private readonly aimDirection = new THREE.Vector3();
+  private aimTimestamp = -Infinity;
+  private lastAimAngle: number | null = null;
   private stableHoveredPlate: number | null = null;
   private hoverCandidate: number | null = null;
   private hoverCandidateSince = 0;
@@ -98,6 +109,9 @@ export class QimenScene {
       this.tetherLines.push(line);
     }
     this.scene.add(this.ground, this.dust, this.formation.group, this.spellSystem.group, this.handOcclusion.group, this.handTrace, this.supportTrace, this.handCore, ...this.tetherLines);
+    this.aimCursor.rotation.x = -Math.PI / 2;
+    this.aimCursor.visible = false;
+    this.formation.heavenPlate.add(this.aimCursor);
 
     this.post = new PostProcessingPipeline(this.renderer, this.scene, this.camera, VISUAL_QUALITY.HIGH);
     this.spellSystem.setVisualQuality(VISUAL_QUALITY.HIGH);
@@ -319,18 +333,27 @@ export class QimenScene {
     }
   }
 
-  pointingHit(snapshot: GestureSnapshot, handSpeed = 0) {
+  pointingHit(snapshot: GestureSnapshot, handSpeed = 0, sampleTimestamp?: number): FormationAimHit {
     if (!snapshot.landmarks.length || !snapshot.pointing) {
       this.stablePointingSector = null;
       return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'NOT_POINTING' };
     }
     const points = snapshot.landmarks[0];
-    const hit = this.rayFromFinger(points);
+    const previousAt = this.aimTimestamp;
+    const hit = this.rayFromFinger(points, sampleTimestamp);
     if (!hit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
     const localHit = this.formation.heavenPlate.worldToLocal(hit.clone());
     const radius = Math.hypot(localHit.x, localHit.z);
     const angle = Math.atan2(localHit.z, localHit.x);
-    const location = { hit: true, localX: localHit.x, localY: localHit.y, localZ: localHit.z, angle };
+    const dt = sampleTimestamp === undefined ? 0 : (sampleTimestamp - previousAt) / 1000;
+    const aimSpeed = this.lastAimAngle === null || dt <= 0 || dt > 0.2 ? 0 :
+      Math.abs(Math.atan2(Math.sin(angle - this.lastAimAngle), Math.cos(angle - this.lastAimAngle))) / dt;
+    this.lastAimAngle = angle;
+    const rawSector = sectorFromLocalPoint(localHit.x, localHit.z);
+    const center = Math.PI / 2 - rawSector * Math.PI / 4;
+    const fromCenter = Math.abs(Math.atan2(Math.sin(angle - center), Math.cos(angle - center)));
+    const boundaryDistance = Math.max(0, (Math.PI / 8 - fromCenter) * 180 / Math.PI);
+    const location = { hit: true, localX: localHit.x, localY: localHit.y, localZ: localHit.z, angle, rawSector, boundaryDistance, aimSpeed };
     if (radius < 0.25 || radius > 5.35) return { ...location, sector: null, reason: 'OUTSIDE_FORMATION' };
     const best = sectorFromLocalPoint(localHit.x, localHit.z);
     if (this.stablePointingSector !== null && this.stablePointingSector !== best) {
@@ -346,6 +369,19 @@ export class QimenScene {
 
   pointingSector(snapshot: GestureSnapshot, handSpeed = 0) {
     return this.pointingHit(snapshot, handSpeed).sector;
+  }
+
+  updateAimCursor(hit: FormationAimHit | null, stage: string, pinchScore: number) {
+    this.aimCursor.visible = Boolean(hit?.hit && hit.sector !== null && this.animator.phase === 'ACTIVE');
+    if (!this.aimCursor.visible || !hit) return;
+    this.aimCursor.position.set(hit.localX ?? 0, (hit.localY ?? 0) + 0.012, hit.localZ ?? 0);
+    this.aimCursor.scale.setScalar(stage === 'LOCK_CANDIDATE' ? 1 + pinchScore * 0.6 : stage === 'TARGET_ARMED' ? 1.25 : 1);
+    this.aimCursor.material.opacity = stage === 'TARGET_ARMED' || stage === 'LOCKED' ? 0.9 : 0.55;
+  }
+
+  resetTargetAim() {
+    this.stablePointingSector = null; this.lastAimAngle = null;
+    this.aimTimestamp = -Infinity; this.aimCursor.visible = false;
   }
 
   /** Chooses the plate whose radial band is nearest the hand/finger contact point. */
@@ -405,7 +441,7 @@ export class QimenScene {
     return THREE.MathUtils.clamp(0.62 + (-tip.z) * 0.9, 0.42, 1);
   }
 
-  private rayFromFinger(points: Landmark[]) {
+  private rayFromFinger(points: Landmark[], sampleTimestamp?: number) {
     const mcp = points[5];
     const tip = points[8];
     const mirroredMcp = landmarkToViewport(mcp.x, mcp.y, window.innerWidth, window.innerHeight);
@@ -414,6 +450,12 @@ export class QimenScene {
     const projectedX = THREE.MathUtils.clamp(mirroredTip.x + (mirroredTip.x - mirroredMcp.x) * extension, 0.01, 0.99);
     const projectedY = THREE.MathUtils.clamp(mirroredTip.y + (mirroredTip.y - mirroredMcp.y) * extension, 0.01, 0.99);
     this.raycaster.setFromCamera(new THREE.Vector2(projectedX * 2 - 1, -(projectedY * 2 - 1)), this.camera);
+    if (sampleTimestamp !== undefined && sampleTimestamp > this.aimTimestamp) {
+      if (sampleTimestamp - this.aimTimestamp > 200) this.aimDirection.copy(this.raycaster.ray.direction);
+      else this.aimDirection.lerp(this.raycaster.ray.direction, 0.65).normalize();
+      this.aimTimestamp = sampleTimestamp;
+      this.raycaster.ray.direction.copy(this.aimDirection);
+    }
     const hit = intersectPlateLocal(this.raycaster.ray, this.formation.heavenPlate, 0.117);
     return hit ? this.formation.heavenPlate.localToWorld(hit) : null;
   }

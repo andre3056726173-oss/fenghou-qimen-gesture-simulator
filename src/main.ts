@@ -10,7 +10,7 @@ import { DebugOverlay } from './ui/DebugOverlay';
 import { Hud } from './ui/Hud';
 import { PALACES } from './qimen/palaces';
 import { AudioEventBus } from './audio/AudioEventBus';
-import { SectorFocusController } from './gestureRecognition/SectorFocusController';
+import { TargetSelectionController } from './gestureRecognition/TargetSelectionController';
 import { GestureMotionDetector } from './gestureRecognition/GestureMotionDetector';
 import { RealSpellCastGate } from './gestureRecognition/RealSpellCastGate';
 import { ZhenInteractionTrace } from './ui/ZhenInteractionTrace';
@@ -41,6 +41,10 @@ const cameraButton = document.querySelector<HTMLButtonElement>('#camera-button')
 const demoButton = document.querySelector<HTMLButtonElement>('#demo-button')!;
 const debugButton = document.querySelector<HTMLButtonElement>('#debug-button')!;
 const debugCanvas = document.querySelector<HTMLCanvasElement>('#debug-canvas')!;
+const spellGuide = document.querySelector<HTMLElement>('#spell-guide')!;
+const spellGuideTitle = document.querySelector<HTMLElement>('#spell-guide-title')!;
+const spellGuideAction = document.querySelector<HTMLElement>('#spell-guide-action')!;
+const spellGuideDetail = document.querySelector<HTMLElement>('#spell-guide-detail')!;
 
 const qimen = new QimenScene(root);
 const tracker = new HandTracker(video);
@@ -52,8 +56,9 @@ const dominantHand = new DominantHandController('Right');
 const hud = new Hud();
 const debug = new DebugOverlay(debugCanvas);
 const audioBus = new AudioEventBus();
-const sectorFocus = new SectorFocusController();
-let cachedFocusState = sectorFocus.update(null, 0, false);
+const sectorFocus = new TargetSelectionController();
+let cachedFocusState = { sector: null as number | null, stage: 'NONE', confidence: 0 };
+let cachedRayHit: ReturnType<QimenScene['pointingHit']> | null = null;
 const tuning = new GestureTuningStore();
 const motionDetector = new GestureMotionDetector(tuning);
 const castGate = new RealSpellCastGate();
@@ -106,6 +111,8 @@ const zhenQaMode = mode.zhenQa;
 
 const kanQaMode = mode.kanQa;
 const spellsQaMode = mode.spellsQa;
+if (spellsQaMode) document.body.classList.add('spells-qa-mode');
+if (!showcaseMode && !presentationDemoMode) document.body.classList.add('target-guide-mode');
 
 const cameraDebugMode = mode.cameraDebug;
 const camera = new CameraSession(video, appEvents.signal, () => disposed);
@@ -189,7 +196,9 @@ function resetInteractionRuntime() {
 
   kanTrace.reset();
 
-  cachedFocusState = sectorFocus.update(null, 0, false);
+  cachedFocusState = { sector: null, stage: 'NONE', confidence: 0 };
+  cachedRayHit = null;
+  qimen.resetTargetAim();
   selectedSector = null;
   previousFocusedSector = null; previousHoveredPlate = null;
   kunTraceEdges.clear(); kunFailure = '—';
@@ -248,6 +257,11 @@ demoButton.addEventListener('click', () => {
 
 debugButton.addEventListener('click', () => {
   if (showcaseMode) return;
+  if (spellsQaMode) {
+    const expanded = document.body.classList.toggle('spells-qa-detail');
+    debugButton.querySelector('span')!.textContent = expanded ? '详细' : '简洁';
+    return;
+  }
   const enabled = debug.toggle();
   debugButton.querySelector('span')!.textContent = enabled ? 'ON' : 'OFF';
   tuningPanel.setVisible(enabled);
@@ -256,6 +270,7 @@ debugButton.addEventListener('click', () => {
 
 window.addEventListener('keydown', (event) => {
   if (showcaseMode || event.repeat || (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName))) return;
+  if (event.code === 'KeyD' && spellsQaMode) { debugButton.click(); return; }
   if (event.code === 'KeyD') debugButton.click();
   if (!debug.enabled) return;
   const debugSector = event.code === 'Digit1' ? 1 : event.code === 'Digit2' ? 7 : event.code === 'Digit3' ? 6 : event.code === 'Digit4' ? 4 : null;
@@ -319,25 +334,40 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     if (qimen.spellSystem.activeSpell) qa.failure(qimen.spellSystem.activeSpell.id, snapshot.handCount ? 'CANCELLED' : 'LOST_HAND');
     emitSpellEvents(qimen.cancelPreparedSpell(timestamp));
     castGate.reset();
-
+    sectorFocus.clearTarget();
     stateMachine.recoverActive();
     hud.toast('术式撤销 · 阵局仍维持');
   }
   const rotation = cachedRotation;
   // Freeze the target while the index bends into a pinch; that transition is not a new ray aim.
-  const pointingActive = stabilized.pointing && !snapshot.pinchActive;
+  const pointingActive = snapshot.pointing && snapshot.pointScore >= 0.5 && !snapshot.pinchActive;
   const pointingSnapshot = { ...snapshot, pointing: pointingActive };
+  if (freshSample && !snapshot.handCount) qimen.resetTargetAim();
   const hoveredPlate = qimen.updatePlateHover(pointingSnapshot, timestamp);
   if (hoveredPlate !== previousHoveredPlate) {
     if (hoveredPlate !== null) audioBus.emit('plate_hover');
     previousHoveredPlate = hoveredPlate;
   }
-  const rayHit = pointingActive ? qimen.pointingHit(pointingSnapshot, motion.speed) : null;
+  if (freshSample && pointingActive) cachedRayHit = qimen.pointingHit(pointingSnapshot, motion.speed, sampleTimestamp);
+  else if (freshSample && sectorFocus.armedSector === null) cachedRayHit = null;
+  const rayHit = cachedRayHit;
   const candidateSector = rayHit?.sector ?? null;
-  if (freshSample && !snapshot.handCount) sectorFocus.clearFocus();
-  const focusState = freshSample
-    ? (cachedFocusState = sectorFocus.update(candidateSector, sampleTimestamp, pointingActive))
-    : cachedFocusState;
+  sectorFocus.update({ timestamp: sampleTimestamp, now: timestamp, fresh: freshSample, hasHand: snapshot.handCount > 0,
+    active: qimen.animator.phase === 'ACTIVE', pointing: pointingActive, pointScore: snapshot.pointScore,
+    sector: candidateSector, boundaryDistance: rayHit?.boundaryDistance ?? 0,
+    aimSpeed: rayHit?.aimSpeed ?? 0, pinchDistance: snapshot.normalizedPinchDistance, graceMs: tuning.values.gracePeriodMs });
+  if (freshSample || sectorFocus.events.length) {
+    const focused = sectorFocus.armedSector !== null;
+    cachedFocusState = { sector: sectorFocus.armedSector ?? sectorFocus.previewSector,
+      stage: sectorFocus.stage === 'LOCKED' ? 'LOCKED' : focused ? 'FOCUSED' : sectorFocus.previewSector !== null ? 'HOVER' : 'NONE',
+      confidence: focused ? 1 : 0.32 };
+    for (const event of sectorFocus.events) {
+      qa.targetEvent(event);
+      if (debug.enabled) timeline.push(event.timestamp, `${event.event} ${event.sector === null ? '—' : PALACES[event.sector]?.name}`);
+    }
+  }
+  const focusState = cachedFocusState;
+  qimen.updateAimCursor(snapshot.handCount ? rayHit : null, sectorFocus.stage, sectorFocus.pinch.score);
   if (kunQaMode && freshSample && pointingActive) {
     traceKun('FINGER_RAY', rayHit?.hit ? `${rayHit.reason} ${candidateSector === null ? '—' : PALACES[candidateSector]?.name}` : rayHit?.reason ?? 'NO_RAY', timestamp);
     if (!rayHit?.hit || candidateSector === null) kunFailure = `RAY_${rayHit?.reason ?? 'NO_RAY'}`;
@@ -360,7 +390,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   }
   if (focusState.stage !== 'FOCUSED' && focusState.stage !== 'LOCKED') previousFocusedSector = null;
   const lockAvailable = snapshot.handCount > 0 && timestamp - sampleTimestamp <= 150 &&
-    sectorFocus.focusedSector !== null && qimen.animator.phase === 'ACTIVE';
+    sectorFocus.armedSector !== null && qimen.animator.phase === 'ACTIVE';
   if (kunQaMode && freshSample && stabilized.pinch && !lockAvailable && selectedSector === 1 && qimen.spellSystem.lockedSector !== 1) {
     kunFailure = 'PINCH_NO_STABLE_KUN_FOCUS';
     traceKun('LOCK_FAILED', kunFailure, timestamp);
@@ -384,7 +414,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     fist: confirmedFist && choreographyState.collapseFormation,
     spellStage: qimen.spellSystem.stage,
     motion: spellMotion,
-    locking: zhenPriority.locking,
+    locking: sectorFocus.armedSector !== null || zhenPriority.locking,
     spellArming: zhenPriority.spellArming && !stabilized.twoHandsPinch,
     rotating: stateMachine.state === 'ROTATING',
     pointing: pointingActive || choreographyState.pointPrewarm,
@@ -394,9 +424,11 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     manipulation: actionPriority !== 'CAST' && actionPriority !== 'SPELL_ARM' && qimen.spellSystem.stage !== 'CASTING',
     space: qimen.spellSystem.stage !== 'CASTING' && !['CAST', 'LOCK', 'SPELL_ARM'].includes(actionPriority),
     suppressFistCollapse: (snapshot.fist || stabilized.fist) && !choreographyState.collapseFormation,
-    lockSector: lockAvailable,
+    lockSector: lockAvailable && sectorFocus.pinch.confirmed,
+    targetArmed: lockAvailable,
+    lockConfirmed: freshSample && sectorFocus.pinch.confirmed,
   };
-  const events = stateMachine.update(stabilized, qimen.animator.phase, timestamp, rotation.velocity, admission);
+  const events = freshSample ? stateMachine.update({ ...stabilized, pointing: pointingActive }, qimen.animator.phase, timestamp, rotation.velocity, admission) : [];
 
   events.forEach((event) => {
     if (event.type === 'SUMMON') {
@@ -418,7 +450,8 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       audioBus.emit('formation_collapse');
       selectedSector = null;
       sectorFocus.reset();
-      cachedFocusState = sectorFocus.update(null, 0, false);
+      cachedFocusState = { sector: null, stage: 'NONE', confidence: 0 };
+      cachedRayHit = null;
       motionDetector.reset();
 
       qimen.resetSpellSystem();
@@ -458,12 +491,15 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
         hud.setPalace(PALACES[sector]);
       }
     } else if (event.type === 'LOCK') {
-      const sector = sectorFocus.focusedSector;
+      const sector = sectorFocus.armedSector;
       xunTrace.event('LOCK_INTENT', sector === 7 ? 'XUN' : sector === null ? 'NO_FOCUS' : PALACES[sector]?.name ?? String(sector), timestamp);
       traceKun('LOCK_INTENT', sector === null ? 'NO_FOCUSED_SECTOR' : PALACES[sector]?.name ?? String(sector), timestamp);
       if (sector !== null) {
         const lockEvents = qimen.lockSpellSector(sector, timestamp);
         if (!lockEvents.length) {
+          sectorFocus.rejectLock();
+          qa.targetEvent(sectorFocus.events[sectorFocus.events.length - 1]);
+          stateMachine.recoverActive();
           kunFailure = qimen.animator.phase !== 'ACTIVE' ? 'LOCK_FORMATION_INACTIVE' : 'LOCK_CASTING_OR_COOLDOWN';
           traceKun('LOCK_FAILED', kunFailure, timestamp);
           xunTrace.event('LOCK_FAILED', kunFailure, timestamp);
@@ -479,7 +515,9 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
         traceKun('LOCKED_SECTOR', PALACES[sector]?.name ?? String(sector), timestamp);
         traceKun('SPELL_CANDIDATE', qimen.spellSystem.activeSpell?.id ?? 'NONE', timestamp);
         kunFailure = '—';
-        sectorFocus.lock(sector);
+        sectorFocus.confirmLock(sampleTimestamp, snapshot.pointScore);
+        const lockEvent = sectorFocus.events[sectorFocus.events.length - 1];
+        if (lockEvent?.event === 'LOCK_SUCCESS') qa.targetEvent(lockEvent);
         qimen.formation.activate(sector, 1);
         inputBuffer.clear();
         emitSpellEvents(lockEvents);
@@ -493,7 +531,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   });
 
   // Keep the visual focus alive between state-machine event edges; lock remains a stronger state.
-  if (stateMachine.state === 'POINTING' && qimen.animator.phase === 'ACTIVE' && focusState.sector !== null && focusState.stage !== 'LOCKED') {
+  if ((stateMachine.state === 'POINTING' || sectorFocus.armedSector !== null) && qimen.animator.phase === 'ACTIVE' && focusState.sector !== null && focusState.stage !== 'LOCKED') {
     if (focusState.stage === 'FOCUSED') qimen.formation.focus(focusState.sector, Math.max(0.72, focusState.confidence));
     else qimen.formation.preview(focusState.sector, 0.32);
   }
@@ -533,6 +571,46 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     previousCastGateTrace = gateTrace;
   }
 
+  if (!showcaseMode && !presentationDemoMode) {
+    const locked = qimen.spellSystem.lockedSector;
+    const sectorName = locked === null ? null : PALACES[locked]?.name ?? String(locked);
+    const spellId = qimen.spellSystem.activeSpell?.id ?? null;
+    const spellNames: Record<string, string> = { KUN_EARTH: '坤 · 土', XUN_WIND: '巽 · 风', ZHEN_LIGHTNING: '震 · 雷', KAN_WATER: '坎 · 水' };
+    const actionNames: Record<string, string> = { KUN_EARTH: '轻推掌', XUN_WIND: '左右短扫', ZHEN_LIGHTNING: '快速弹开拇指和食指', KAN_WATER: '朝身体方向轻拉' };
+    const stageNames: Record<string, string> = { PREPARING: '术式对位中', ALIGNED: '阵局已对位', CHARGING: '蓄势中', CASTING: '术法发动中', COOLDOWN: '术式冷却中' };
+    let headline = '指向宫位并捏合锁定';
+    let detail = '看到 Focus 指向目标宫后再捏合';
+    let ready = false;
+    if (!camera.active) { headline = '先启用摄像头'; detail = '点击左下角「启用摄像头」'; }
+    else if (!snapshot.handCount) { headline = '把一只完整手掌放入画面'; detail = '稍等系统重新识别手掌'; }
+    else if (qimen.animator.phase !== 'ACTIVE') { headline = '张开手掌召阵'; detail = '等悬浮阵局展开完成'; }
+    else if (spellEvents.some(event => event.type === 'cast')) { headline = '施法成功'; detail = `${spellNames[spellId ?? ''] ?? '术法'} 已从阵局发动`; ready = true; }
+    else if (sectorFocus.armedSector !== null || sectorFocus.previewSector !== null && sectorFocus.stage === 'TARGET_PREVIEW') {
+      const name = PALACES[sectorFocus.armedSector ?? sectorFocus.previewSector ?? 0]?.name;
+      headline = sectorFocus.stage === 'LOCK_CANDIDATE' ? `锁定${name}宫…` : sectorFocus.armedSector !== null ? `${name}宫 · 已瞄准` : `${name}宫 · 预览`;
+      detail = sectorFocus.armedSector !== null ? '捏合锁定' : '保持指向片刻';
+    }
+    else if (qimen.spellSystem.stage === 'READY') {
+      if (!spellId) { headline = sectorName ? `${sectorName}宫已锁定` : '选择目标宫位'; detail = '指向另一宫并捏合，可切换术式'; }
+      else if (castGate.phase === 'WAIT_RELEASE_AFTER_LOCK' || castGate.failure === 'INPUT_CONSUMED_BY_LOCK' || castGate.failure === 'WAITING_RELEASE_AFTER_LOCK') {
+        headline = '先完全松开锁宫手势'; detail = '这是解除定宫状态，不能作为施术动作';
+      } else if (castGate.candidate) { headline = '动作已识别'; detail = '保持方向，让下一帧确认'; }
+      else if (spellId === 'ZHEN_LIGHTNING') {
+        ready = castGate.armed;
+        headline = castGate.armed ? '可以施法 · 快速弹开' : 'READY · 重新捏合蓄势';
+        detail = castGate.armed ? '拇指与食指快速分开' : '捏合保持约 260ms，再快速弹开';
+      } else if (castGate.armed) { ready = true; headline = `可以施法 · ${actionNames[spellId] ?? '执行发动动作'}`; detail = '现在做一次新的轻柔动作'; }
+      else { headline = 'READY · 张掌稳定一下'; detail = '稳定后再做发动动作；就绪前的动作不计'; }
+    } else if (stageNames[qimen.spellSystem.stage]) {
+      headline = qimen.spellSystem.stage === 'CHARGING' ? `术式蓄势 ${(qimen.spellSystem.controller.chargeProgress(timestamp, tuning.values.chargeScale) * 100).toFixed(0)}%` : qimen.spellSystem.stage === 'PREPARING' ? `${sectorName}宫 · 已锁定` : stageNames[qimen.spellSystem.stage]; detail = '保持手掌在画面内，等状态变为 READY';
+    } else if (locked === null) { headline = pointingActive ? '正在识别指向…' : '指向目标宫位，再捏合锁定'; detail = '看到已瞄准后，用一次新的捏合确认'; }
+    else if (!spellId) { headline = `${sectorName}宫 · 已锁定`; detail = '再指向想施展的宫位并捏合，可换宫'; }
+    spellGuideTitle.textContent = spellEvents.some(event => event.type === 'cast') ? '施法成功' : ready ? '可以施法' : qimen.spellSystem.stage === 'READY' ? '术式 READY' : '施法状态';
+    spellGuideAction.textContent = headline;
+    spellGuideDetail.textContent = `${detail}${spellId ? ` · ${spellNames[spellId] ?? spellId}` : ''}${sectorName ? ` · 锁定${sectorName}宫` : ''}`;
+    spellGuide.classList.toggle('is-ready', ready);
+  }
+
   if (qa.session) qa.setEnvironment({
     camera: camera.label,
     cameraFps: camera.frameRate,
@@ -541,6 +619,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     detectedHands: snapshot.handCount,
     choreography: choreography.stage,
     spellState: qimen.spellSystem.stage,
+    targetState: sectorFocus.stage, armedSector: sectorFocus.armedSector, lockFailure: sectorFocus.failure,
   });
   const calibrationInstruction = freshSample ? calibration.update(snapshot, motion) : null;
   if (calibrationInstruction && calibrationInstruction !== lastCalibrationInstruction) {
@@ -563,6 +642,15 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
   const renderStats = qimen.getPerformanceDebug();
   const rayLocal = rayHit?.hit ? `${rayHit.localX?.toFixed(2)}, ${rayHit.localY?.toFixed(2)}, ${rayHit.localZ?.toFixed(2)}` : '—';
   const rayAngle = rayHit?.angle === null || rayHit?.angle === undefined ? '—' : `${(rayHit.angle * 180 / Math.PI).toFixed(1)}°`;
+  const targetLines = [
+    `Target ${sectorFocus.stage} · Failure ${sectorFocus.failure}`,
+    `rawPoint ${snapshot.pointScore.toFixed(2)} · stablePoint ${stabilized.pointing} · Ray ${rayHit?.hit ?? false}`,
+    `rawSector ${rayHit?.rawSector ?? '—'} · stableSector ${candidateSector ?? '—'} · boundary ${(rayHit?.boundaryDistance ?? 0).toFixed(1)}°`,
+    `Preview ${sectorFocus.previewSector ?? '—'} · Focus ${sectorFocus.focusedSector ?? '—'} · Armed ${sectorFocus.armedSector ?? '—'}`,
+    `dwell ${sectorFocus.focusDwellMs}ms · armed age ${sectorFocus.armedSector === null ? '—' : Math.max(0, sampleTimestamp - sectorFocus.armedAt).toFixed(0)}ms`,
+    `raw distance ${snapshot.pinchDistance.toFixed(3)} · normalized ${snapshot.normalizedPinchDistance.toFixed(2)} · score ${sectorFocus.pinch.score.toFixed(2)} · closing ${sectorFocus.pinch.closingVelocity.toFixed(2)}/s`,
+    `edge ${sectorFocus.pinch.downEdge} · candidate ${sectorFocus.pinch.candidate} · confirmed ${sectorFocus.pinch.confirmed} · lockIntent ${admission.lockConfirmed} · lockConfirmed ${sectorFocus.stage === 'LOCKED'}`,
+  ];
   debug.updateQa(spellsQaMode ? [
     'FOUR SPELL CHAINS QA · real camera',
     `Lock ${qimen.spellSystem.lockedSector === null ? '—' : PALACES[qimen.spellSystem.lockedSector]?.name} · Spell ${qimen.spellSystem.activeSpell?.id ?? 'NONE'}`,
@@ -612,7 +700,7 @@ xunQaMode ? xunTrace.lines({ timestamp, hasHand: snapshot.handCount > 0,
     `Sample age:${Math.max(0, timestamp - sampleTimestamp).toFixed(0)}ms · physical Hand/Rotate/Cast latency: unmeasured`,
     `Render draw:${renderStats.drawCalls} tri:${renderStats.triangles} geo:${renderStats.geometries} tex:${renderStats.textures} spell:${renderStats.activeSpellObjects}/${renderStats.pooledSpellObjects}`,
     ...timeline.lines(timestamp),
-  ]);
+  ].concat(targetLines));
   hud.update(snapshot, latestFps);
   camera.updateDiagnostics();
 }
@@ -628,7 +716,7 @@ function loop(timestamp: number) {
     const primary = frame.hands[0]?.handedness ?? null;
     if (primary && lastPrimaryHand && primary !== lastPrimaryHand) {
       recognizer.reset(); motionDetector.reset(); rotationController.reset(); smoother.reset(); inputBuffer.clear(); castGate.reset();
-
+      sectorFocus.reset(); cachedRayHit = null; qimen.resetTargetAim();
     }
     if (primary) lastPrimaryHand = primary;
     cachedSnapshot = recognizer.update(frame);
