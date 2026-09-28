@@ -12,9 +12,9 @@ import { PerformanceGovernor, type PerformanceTier } from './PerformanceGovernor
 import { HandOcclusionSystem } from './HandOcclusionSystem';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { VISUAL_QUALITY, qualityFromPerformanceTier, type VisualQualityLevel } from './VisualQualityConfig';
-import { landmarkToViewport, screenDirectionToSpell } from '../handTracking/CameraCoordinates';
+import { fingertipToNdc, landmarkToViewport, screenDirectionToSpell } from '../handTracking/CameraCoordinates';
 import { FORMATION_STYLE, FRONT_FORMATION_CENTER, FRONT_MAX_SPACE_SCALE, FRONT_MIN_SPACE_SCALE } from '../qimen/FormationStyle';
-import { intersectPlateLocal, sectorFromLocalPoint } from '../qimen/FormationPicking';
+import { intersectPlateLocal, sectorFromLocalPoint, sectorPoint } from '../qimen/FormationPicking';
 import { disposeObjectTrees } from './ResourceLifecycle';
 
 export interface FormationAimHit {
@@ -50,6 +50,8 @@ export class QimenScene {
   private stablePointingSector: number | null = null;
   private readonly aimCursor = new THREE.Mesh(new THREE.RingGeometry(0.045, 0.07, 24),
     new THREE.MeshBasicMaterial({ color: 0xc9efe4, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+  private readonly lockedAim = new THREE.Mesh(new THREE.RingGeometry(0.085, 0.105, 32),
+    new THREE.MeshBasicMaterial({ color: 0xe2c681, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
   private readonly aimDirection = new THREE.Vector3();
   private aimTimestamp = -Infinity;
   private lastAimAngle: number | null = null;
@@ -111,7 +113,9 @@ export class QimenScene {
     this.scene.add(this.ground, this.dust, this.formation.group, this.spellSystem.group, this.handOcclusion.group, this.handTrace, this.supportTrace, this.handCore, ...this.tetherLines);
     this.aimCursor.rotation.x = -Math.PI / 2;
     this.aimCursor.visible = false;
-    this.formation.heavenPlate.add(this.aimCursor);
+    this.lockedAim.rotation.x = -Math.PI / 2;
+    this.lockedAim.visible = false;
+    this.formation.heavenPlate.add(this.aimCursor, this.lockedAim);
 
     this.post = new PostProcessingPipeline(this.renderer, this.scene, this.camera, VISUAL_QUALITY.HIGH);
     this.spellSystem.setVisualQuality(VISUAL_QUALITY.HIGH);
@@ -340,9 +344,19 @@ export class QimenScene {
     }
     const points = snapshot.landmarks[0];
     const previousAt = this.aimTimestamp;
-    const hit = this.rayFromFinger(points, sampleTimestamp);
-    if (!hit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
-    const localHit = this.formation.heavenPlate.worldToLocal(hit.clone());
+    // FRONT_CIRCLE is an image-space interaction: the visible fingertip, not an
+    // unstable monocular bone-depth extrapolation, owns the cursor and sector.
+    let localHit: THREE.Vector3 | null;
+    if (FORMATION_STYLE === 'FRONT_CIRCLE') {
+      const ndc = fingertipToNdc(points[8].x, points[8].y, window.innerWidth, window.innerHeight);
+      this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
+      localHit = intersectPlateLocal(this.raycaster.ray, this.formation.heavenPlate, 0.117);
+      if (sampleTimestamp !== undefined) this.aimTimestamp = sampleTimestamp;
+    } else {
+      const hit = this.rayFromFinger(points, sampleTimestamp);
+      localHit = hit ? this.formation.heavenPlate.worldToLocal(hit.clone()) : null;
+    }
+    if (!localHit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
     const radius = Math.hypot(localHit.x, localHit.z);
     const angle = Math.atan2(localHit.z, localHit.x);
     const dt = sampleTimestamp === undefined ? 0 : (sampleTimestamp - previousAt) / 1000;
@@ -364,7 +378,7 @@ export class QimenScene {
       if (difference < Math.PI / 8 + extra) return { ...location, sector: this.stablePointingSector, reason: 'SECTOR_HYSTERESIS' };
     }
     this.stablePointingSector = best;
-    return { ...location, sector: best, reason: 'HIT' };
+    return { ...location, sector: best, reason: FORMATION_STYLE === 'FRONT_CIRCLE' ? 'SCREEN_HIT' : 'HIT' };
   }
 
   pointingSector(snapshot: GestureSnapshot, handSpeed = 0) {
@@ -377,6 +391,15 @@ export class QimenScene {
     this.aimCursor.position.set(hit.localX ?? 0, (hit.localY ?? 0) + 0.012, hit.localZ ?? 0);
     this.aimCursor.scale.setScalar(stage === 'LOCK_CANDIDATE' ? 1 + pinchScore * 0.6 : stage === 'TARGET_ARMED' ? 1.25 : 1);
     this.aimCursor.material.opacity = stage === 'TARGET_ARMED' || stage === 'LOCKED' ? 0.9 : 0.55;
+  }
+
+  setLockedAim(sector: number | null, hit: FormationAimHit | null = null) {
+    this.lockedAim.visible = sector !== null;
+    if (sector === null) return;
+    const point = hit?.sector === sector && hit.localX !== null && hit.localZ !== null
+      ? new THREE.Vector3(hit.localX, 0.13, hit.localZ)
+      : sectorPoint(sector, 4.45, 0.13);
+    this.lockedAim.position.copy(point);
   }
 
   resetTargetAim() {

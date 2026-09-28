@@ -24,3 +24,9 @@ export function landmarkToViewport(x: number, y: number, width: number, height: 
     y: ((y - 0.5) * sourceHeight * scale + height / 2) / height,
   };
 }
+
+/** Screen fingertip -> camera ray coordinates, with the same mirror and cover crop as the preview. */
+export function fingertipToNdc(x: number, y: number, width: number, height: number) {
+  const point = landmarkToViewport(x, y, width, height);
+  return { x: point.x * 2 - 1, y: 1 - point.y * 2 };
+}

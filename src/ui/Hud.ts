@@ -19,6 +19,17 @@ export class Hud {
   private palaceSpell = document.querySelector<HTMLElement>('#palace-spell')!;
   private toastElement = document.querySelector<HTMLElement>('#toast')!;
   private toastTimer = 0;
+  private lockStatus = document.querySelector<HTMLElement>('#lock-status')!;
+  private targetStatus = document.querySelector<HTMLElement>('#target-palace-status')!;
+  private lockedStatus = document.querySelector<HTMLElement>('#locked-palace-status')!;
+  private spellStatus = document.querySelector<HTMLElement>('#spell-status')!;
+
+  setInteractionStatus(target: string | null, locked: string | null, spell: string | null) {
+    this.targetStatus.textContent = target ?? '—';
+    this.lockedStatus.textContent = locked ? `${locked} · LOCKED` : '未锁定';
+    this.spellStatus.textContent = spell ?? '—';
+    this.lockStatus.classList.toggle('is-locked', locked !== null);
+  }
 
   setTrackerStatus(status: TrackerStatus, message: string) {
     this.cameraStatus.textContent = message;

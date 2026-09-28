@@ -1,4 +1,5 @@
 import './styles.css';
+import { buildBranch, buildCommit } from 'virtual:qimen-build';
 import { HandTracker, type TrackerStatus } from './handTracking/HandTracker';
 import { GestureRecognizer } from './gestureRecognition/GestureRecognizer';
 import { GestureSmoother } from './gestureRecognition/GestureSmoother';
@@ -16,14 +17,14 @@ import { RealSpellCastGate } from './gestureRecognition/RealSpellCastGate';
 import { ZhenInteractionTrace } from './ui/ZhenInteractionTrace';
 import { KanInteractionTrace } from './ui/KanInteractionTrace';
 
-import { GestureTuningStore } from './gestureRecognition/GestureTuning';
+import { DEFAULT_GESTURE_TUNING, GestureTuningStore } from './gestureRecognition/GestureTuning';
 import { GestureInputBuffer } from './gestureRecognition/GestureInputBuffer';
 import { XunInteractionTrace } from './ui/XunInteractionTrace';
 import { GesturePriorityResolver } from './gestureRecognition/GesturePriorityResolver';
 import { GestureChoreographyController } from './gestureRecognition/GestureChoreographyController';
 import { GestureDebugRecorder } from './gestureRecognition/GestureDebugRecorder';
 import { GestureCalibration } from './gestureRecognition/GestureCalibration';
-import { RealInteractionQA } from './gestureRecognition/RealInteractionQA';
+import { RealInteractionQA, hasTargetQaSchema } from './gestureRecognition/RealInteractionQA';
 import { GestureTuningPanel } from './ui/GestureTuningPanel';
 import { InteractionEventTimeline } from './ui/InteractionEventTimeline';
 import { SpellDemoDirector } from './showcase/SpellDemoDirector';
@@ -45,6 +46,8 @@ const spellGuide = document.querySelector<HTMLElement>('#spell-guide')!;
 const spellGuideTitle = document.querySelector<HTMLElement>('#spell-guide-title')!;
 const spellGuideAction = document.querySelector<HTMLElement>('#spell-guide-action')!;
 const spellGuideDetail = document.querySelector<HTMLElement>('#spell-guide-detail')!;
+document.querySelector<HTMLElement>('#build-branch')!.textContent = buildBranch || 'DEV UNKNOWN';
+document.querySelector<HTMLElement>('#build-commit')!.textContent = buildCommit || 'DEV UNKNOWN';
 
 const qimen = new QimenScene(root);
 const tracker = new HandTracker(video);
@@ -74,6 +77,11 @@ const recorder = new GestureDebugRecorder();
 const calibration = new GestureCalibration(tuning);
 const tuningPanel = new GestureTuningPanel(tuning);
 const qa = new RealInteractionQA();
+const targetQaSchemaActive = hasTargetQaSchema(qa.snapshot(DEFAULT_GESTURE_TUNING));
+if (!targetQaSchemaActive) {
+  document.querySelector<HTMLElement>('#target-qa-warning')!.hidden = false;
+  console.error('TARGET LOCK QA NOT ACTIVE: targetSelection / targetTimeline missing from QA export');
+}
 const timeline = new InteractionEventTimeline();
 const sampleGate = new FrameSampleGate();
 const invariantGuard = new StateInvariantGuard();
@@ -199,6 +207,7 @@ function resetInteractionRuntime() {
   cachedFocusState = { sector: null, stage: 'NONE', confidence: 0 };
   cachedRayHit = null;
   qimen.resetTargetAim();
+  qimen.setLockedAim(null);
   selectedSector = null;
   previousFocusedSector = null; previousHoveredPlate = null;
   kunTraceEdges.clear(); kunFailure = '—';
@@ -335,6 +344,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     emitSpellEvents(qimen.cancelPreparedSpell(timestamp));
     castGate.reset();
     sectorFocus.clearTarget();
+    qimen.setLockedAim(null);
     stateMachine.recoverActive();
     hud.toast('术式撤销 · 阵局仍维持');
   }
@@ -452,6 +462,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       sectorFocus.reset();
       cachedFocusState = { sector: null, stage: 'NONE', confidence: 0 };
       cachedRayHit = null;
+      qimen.setLockedAim(null);
       motionDetector.reset();
 
       qimen.resetSpellSystem();
@@ -461,6 +472,16 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       previousSpellStage = qimen.spellSystem.stage;
       hud.toast('握拳 · 阵局收束');
     } else if (event.type === 'BEGIN_ROTATION') {
+      if (sectorFocus.armedSector !== null && sectorFocus.pinch.downEdge) {
+        const message = 'TARGET_LOCK_STOLEN_BY_ROTATE';
+        console.error(message, { armedSector: sectorFocus.armedSector, targetState: sectorFocus.stage });
+        sectorFocus.failure = message;
+        qa.targetEvent({ timestamp: sampleTimestamp, event: message, sector: sectorFocus.armedSector,
+          pointScore: snapshot.pointScore, pinchScore: sectorFocus.pinch.score, state: sectorFocus.stage });
+        if (debug.enabled) timeline.push(timestamp, `ERROR ${message}`);
+        stateMachine.recoverActive();
+        return;
+      }
       castGate.consumeRotation();
       qimen.formation.beginRotationOn(hoveredPlate ?? 3);
       if (debug.enabled) timeline.push(timestamp, `GRAB Plate ${hoveredPlate ?? 3}`);
@@ -516,6 +537,7 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
         traceKun('SPELL_CANDIDATE', qimen.spellSystem.activeSpell?.id ?? 'NONE', timestamp);
         kunFailure = '—';
         sectorFocus.confirmLock(sampleTimestamp, snapshot.pointScore);
+        qimen.setLockedAim(sector, rayHit);
         const lockEvent = sectorFocus.events[sectorFocus.events.length - 1];
         if (lockEvent?.event === 'LOCK_SUCCESS') qa.targetEvent(lockEvent);
         qimen.formation.activate(sector, 1);
@@ -578,8 +600,12 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     const spellNames: Record<string, string> = { KUN_EARTH: '坤 · 土', XUN_WIND: '巽 · 风', ZHEN_LIGHTNING: '震 · 雷', KAN_WATER: '坎 · 水' };
     const actionNames: Record<string, string> = { KUN_EARTH: '轻推掌', XUN_WIND: '左右短扫', ZHEN_LIGHTNING: '快速弹开拇指和食指', KAN_WATER: '朝身体方向轻拉' };
     const stageNames: Record<string, string> = { PREPARING: '术式对位中', ALIGNED: '阵局已对位', CHARGING: '蓄势中', CASTING: '术法发动中', COOLDOWN: '术式冷却中' };
+    const targetIndex = sectorFocus.armedSector ?? sectorFocus.previewSector ?? (pointingActive ? candidateSector : null) ?? locked;
+    const targetName = targetIndex === null ? null : PALACES[targetIndex]?.name ?? String(targetIndex);
+    const spellStatus = spellId ? `${spellNames[spellId] ?? spellId} ${qimen.spellSystem.stage}${qimen.spellSystem.stage === 'CHARGING' ? ` ${(qimen.spellSystem.controller.chargeProgress(timestamp, tuning.values.chargeScale) * 100).toFixed(0)}%` : ''}` : null;
+    hud.setInteractionStatus(targetName, sectorName, spellStatus);
     let headline = '指向宫位并捏合锁定';
-    let detail = '看到 Focus 指向目标宫后再捏合';
+    let detail = '目标宫位显示「已瞄准」后捏合';
     let ready = false;
     if (!camera.active) { headline = '先启用摄像头'; detail = '点击左下角「启用摄像头」'; }
     else if (!snapshot.handCount) { headline = '把一只完整手掌放入画面'; detail = '稍等系统重新识别手掌'; }
@@ -652,6 +678,8 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
     `edge ${sectorFocus.pinch.downEdge} · candidate ${sectorFocus.pinch.candidate} · confirmed ${sectorFocus.pinch.confirmed} · lockIntent ${admission.lockConfirmed} · lockConfirmed ${sectorFocus.stage === 'LOCKED'}`,
   ];
   debug.updateQa(spellsQaMode ? [
+    ...(!targetQaSchemaActive ? ['WARNING: TARGET LOCK QA NOT ACTIVE'] : []),
+    ...targetLines,
     'FOUR SPELL CHAINS QA · real camera',
     `Lock ${qimen.spellSystem.lockedSector === null ? '—' : PALACES[qimen.spellSystem.lockedSector]?.name} · Spell ${qimen.spellSystem.activeSpell?.id ?? 'NONE'}`,
     `Spell ${qimen.spellSystem.stage} · Gate ${spellEvents.some(e => e.type === 'cast')} · ${castGate.phase}`,

@@ -278,3 +278,22 @@ body.experience-active:not(.debug-active) .hud-card,
 body.experience-active:not(.debug-active) .selection-panel,
 body.experience-active:not(.debug-active) .control-bar { opacity: 0; visibility: hidden; pointer-events: none; }
 body.experience-active:not(.debug-active) .brand { opacity: .28; transform: scale(.86); transform-origin: left top; }
+
+.build-fingerprint { display: none; position: fixed; z-index: 11; top: 12px; left: 16px; max-width: 300px;
+  padding: 7px 10px; background: rgba(4, 12, 11, .78); border-left: 2px solid rgba(210,170,88,.7);
+  color: #d5e6dd; font: 11px/1.4 ui-monospace, Consolas, monospace; pointer-events: none; }
+.build-fingerprint span, .build-fingerprint strong, .build-fingerprint small, .build-fingerprint em { display: block; font-weight: 400; font-style: normal; overflow-wrap: anywhere; }
+.build-fingerprint span { color: #d2aa58; letter-spacing: .14em; }
+.build-fingerprint em { color: #ff957d; margin-top: 4px; }
+body.debug-active .build-fingerprint, body:is(.spells-qa-mode, .target-guide-mode).debug-active .build-fingerprint { display: block; }
+.lock-status { position: fixed; z-index: 9; top: 18px; right: 18px; width: min(250px, calc(100vw - 36px));
+  padding: 9px 13px; background: rgba(5, 14, 12, .76); border: 1px solid rgba(160,190,170,.25);
+  border-radius: 6px; backdrop-filter: blur(7px); pointer-events: none; }
+.lock-status div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 5px 0;
+  color: rgba(225,234,220,.68); font-size: 12px; }
+.lock-status strong { color: #e6e4ce; font-weight: 500; text-align: right; }
+.lock-status.is-locked { border-color: rgba(219,190,119,.57); }
+.lock-status.is-locked #locked-palace-status { color: #efd59c; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide:not(.is-ready) { top: 146px; }
+body:is(.demo-mode, .showcase-mode, .camera-debug) .lock-status,
+body:is(.demo-mode, .showcase-mode, .camera-debug) .build-fingerprint { display: none !important; }

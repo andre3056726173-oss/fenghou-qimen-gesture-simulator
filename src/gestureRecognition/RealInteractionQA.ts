@@ -3,6 +3,12 @@ import type { TargetEvent } from './TargetSelectionController';
 
 export interface SpellQaCounters { attempts: number; success: number; failures: Record<string, number>; }
 
+export function hasTargetQaSchema(report: unknown): boolean {
+  if (!report || typeof report !== 'object') return false;
+  const data = report as Record<string, unknown>;
+  return Boolean(data.targetSelection && typeof data.targetSelection === 'object' && Array.isArray(data.targetTimeline));
+}
+
 export const REAL_QA_CHECKLIST = [
   '光照：明亮 / 普通 / 偏暗 / 背光',
   '手位：胸前 / 近镜头 / 远镜头 / 画面边缘',
@@ -44,7 +50,7 @@ export class RealInteractionQA {
     if (event.event === 'LOCK_ATTEMPT') s.lockAttempts += 1;
     if (event.event === 'LOCK_SUCCESS') { s.lockSuccess += 1; s.lockLatencyMs.push(event.latencyMs ?? 0); }
     // Pending confirmation belongs in the timeline, not in failed-attempt counts.
-    if (['FOCUS_TIMEOUT', 'FOCUS_EXPIRED', 'ARMED_TARGET_MISSING', 'PINCH_STOLEN_BY_ROTATE', 'LOCK_TIMEOUT', 'HAND_LOST', 'PINCH_ALREADY_ACTIVE', 'SECTOR_UNSTABLE'].includes(event.event))
+    if (['FOCUS_TIMEOUT', 'FOCUS_EXPIRED', 'ARMED_TARGET_MISSING', 'PINCH_STOLEN_BY_ROTATE', 'TARGET_LOCK_STOLEN_BY_ROTATE', 'LOCK_TIMEOUT', 'HAND_LOST', 'PINCH_ALREADY_ACTIVE', 'SECTOR_UNSTABLE'].includes(event.event))
       s.failureReasons[event.event] = (s.failureReasons[event.event] ?? 0) + 1;
   }
 

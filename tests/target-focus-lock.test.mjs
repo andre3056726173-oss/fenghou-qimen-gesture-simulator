@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TargetSelectionController } from '../src/gestureRecognition/TargetSelectionController.ts';
 import { GestureStateMachine } from '../src/gestureRecognition/GestureStateMachine.ts';
-import { RealInteractionQA } from '../src/gestureRecognition/RealInteractionQA.ts';
+import { RealInteractionQA, hasTargetQaSchema } from '../src/gestureRecognition/RealInteractionQA.ts';
+import { fingertipToNdc, setCameraDimensions } from '../src/handTracking/CameraCoordinates.ts';
+import { intersectPlateLocal, sectorFromLocalPoint } from '../src/qimen/FormationPicking.ts';
+import { QimenFormation } from '../src/qimen/QimenFormation.ts';
+import * as THREE from 'three';
 import { SpellCastController } from '../src/spells/SpellCastController.ts';
 import { SPELL_DEFINITIONS } from '../src/spells/SpellDefinition.ts';
 
@@ -22,9 +26,28 @@ test('two fresh camera samples produce immediate target preview', () => {
   const c = new TargetSelectionController(); c.update(sample(1000)); assert.equal(c.previewSector, null);
   c.update(sample(1033)); assert.equal(c.stage, 'TARGET_PREVIEW'); assert.equal(c.previewSector, 1);
 });
+test('100% POINT and mirrored fingertip aimed at KUN yields screen-space KUN preview', () => {
+  setCameraDimensions(1280, 720);
+  const ndc = fingertipToNdc(0.25, 0.75, 1280, 720);
+  const camera = new THREE.PerspectiveCamera(90, 1280 / 720, 0.1, 100);
+  camera.position.set(0, 0, 5); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
+  const plate = new THREE.Group(); plate.rotation.x = Math.PI / 2; plate.updateMatrixWorld();
+  const raycaster = new THREE.Raycaster(); raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
+  const hit = intersectPlateLocal(raycaster.ray, plate, 0);
+  assert.ok(hit); assert.equal(sectorFromLocalPoint(hit.x, hit.z), 1);
+  const c = new TargetSelectionController();
+  c.update(sample(1000, { pointScore: 1, sector: 1 }));
+  c.update(sample(1033, { pointScore: 1, sector: 1 }));
+  assert.equal(c.previewSector, 1);
+});
 test('slow central aim focuses and arms in 100ms', () => {
   const c = focused(); assert.equal(c.focusedSector, 1); assert.equal(c.armedSector, 1);
   assert.equal(c.focusDwellMs, 100);
+});
+test('Focus immediately owns an armed target even as POINT disappears', () => {
+  const c = focused(); assert.equal(c.stage, 'TARGET_ARMED');
+  c.update(sample(1133, { pointing: false, sector: null, pointScore: 0, pinchDistance: 0.5 }));
+  assert.equal(c.armedSector, 1);
 });
 test('moving/boundary aim uses a longer 200ms dwell', () => {
   const c = new TargetSelectionController();
@@ -102,6 +125,29 @@ test('QA report keeps focus/lock counts, latency and diagnostic timeline', () =>
   assert.equal(report.targetSelection.focusSuccess, 1); assert.equal(report.targetSelection.lockSuccess, 1);
   assert.deepEqual(report.targetSelection.lockLatencyMs, [33]);
   assert.ok(report.targetTimeline.some(e => e.event === 'LOCK_SUCCESS'));
+  assert.equal(hasTargetQaSchema(report), true);
+  assert.equal(hasTargetQaSchema({ spell: {}, environment: {} }), false);
+});
+
+test('locked sector persists across a new POINT preview until another lock or cancel', () => {
+  const c = focused(); pinch(c); c.confirmLock(1166, 0.2);
+  c.update(sample(1200, { sector: 2, pinchDistance: 0.6 }));
+  c.update(sample(1233, { sector: 2, pinchDistance: 0.6 }));
+  assert.equal(c.previewSector, 2); assert.equal(c.lockedSector, 1);
+});
+test('visual plate preview/focus cannot erase an existing locked palace', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ width: 0, height: 0,
+    getContext: () => new Proxy({}, { get: () => () => {} }) }) };
+  try {
+    const formation = new QimenFormation();
+    formation.activate(1, 1);
+    formation.preview(2, 0.3);
+    formation.focus(2, 0.8);
+    assert.equal(formation.lockedSector, 1);
+    formation.activate(2, 1);
+    assert.equal(formation.lockedSector, 2);
+  } finally { globalThis.document = previousDocument; }
 });
 
 test('camera stall expires target on wall time without advancing sample evidence', () => {
