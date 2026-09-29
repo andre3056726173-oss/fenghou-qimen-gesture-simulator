@@ -285,6 +285,7 @@ body.experience-active:not(.debug-active) .brand { opacity: .28; transform: scal
 .build-fingerprint span, .build-fingerprint strong, .build-fingerprint small, .build-fingerprint em { display: block; font-weight: 400; font-style: normal; overflow-wrap: anywhere; }
 .build-fingerprint span { color: #d2aa58; letter-spacing: .14em; }
 .build-fingerprint em { color: #ff957d; margin-top: 4px; }
+.build-fingerprint em[hidden] { display: none; }
 body.debug-active .build-fingerprint, body:is(.spells-qa-mode, .target-guide-mode).debug-active .build-fingerprint { display: block; }
 .lock-status { position: fixed; z-index: 9; top: 18px; right: 18px; width: min(250px, calc(100vw - 36px));
   padding: 9px 13px; background: rgba(5, 14, 12, .76); border: 1px solid rgba(160,190,170,.25);
