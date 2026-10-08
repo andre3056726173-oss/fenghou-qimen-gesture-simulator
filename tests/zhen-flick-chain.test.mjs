@@ -50,6 +50,16 @@ function harness(ready = true) {
   return { gate, spell, detector, step, neutral, arm, get now() { return now; }, get casts() { return casts; } };
 }
 
+test('15fps skipped samples preserve ZHEN pinch hold and allow release confirmation', () => {
+  const h = harness();
+  for (let i = 0; i < 5; i++) h.step(.5, { dt: 1000 / 15 });
+  h.step(.1, { dt: 1000 / 15 }); assert.equal(h.gate.status.stage, 'FLICK_ARMED');
+  for (let i = 0; i < 3; i++) h.step(.1, { dt: 1000 / 15 });
+  h.step(.1, { dt: 2000 / 15 }); assert.equal(h.gate.status.stage, 'FLICK_ARMED');
+  h.step(.55, { dt: 1000 / 15 }); assert.equal(h.gate.status.stage, 'RELEASE_CANDIDATE');
+  h.step(.6, { dt: 2000 / 15 }); assert.equal(h.casts, 1);
+});
+
 test('POINT ZHEN + PINCH is exclusively LOCK, and consumed cycle cannot rotate or cast', () => {
   const h = harness();
   const machine = new GestureStateMachine(), priority = new GesturePriorityResolver();
@@ -122,7 +132,7 @@ test('stale RAF samples cannot advance derivatives, edges or a release candidate
   const stale = h.step(.65, { fresh: false });
   assert.equal(stale.status.failure, 'STALE_SAMPLE'); assert.equal(stale.status.pinchRelease, false);
   assert.equal(stale.status.separationVelocity, prior); assert.equal(h.casts, 0);
-  h.step(.65, { dt: 150 }); assert.equal(h.casts, 0);
+  h.step(.65, { dt: 300 }); assert.equal(h.casts, 0);
 });
 
 test('one fast release has exactly one CAST event despite repeated release history', () => {
@@ -163,7 +173,7 @@ test('invalid landmarks, sparse camera samples and too-short holds disarm safely
   const invalid = snapshot(.6); invalid.landmarks[0][8].x = NaN;
   assert.equal(h.step(.6, { snapshot: invalid }).status.failure, 'HAND_LOST'); assert.equal(h.casts, 0);
   const sparse = harness(); sparse.arm();
-  assert.equal(sparse.step(.6, { dt: 200 }).status.pinchRelease, false); assert.equal(sparse.casts, 0);
+  assert.equal(sparse.step(.6, { dt: 300 }).status.pinchRelease, false); assert.equal(sparse.casts, 0);
   const short = harness(); short.neutral(); short.step(.1); short.step(.6); short.step(.65);
   assert.equal(short.casts, 0);
 });

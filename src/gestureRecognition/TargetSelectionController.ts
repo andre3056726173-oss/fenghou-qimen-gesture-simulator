@@ -26,6 +26,7 @@ export class TargetSelectionController {
   private candidateAt = 0;
   private samples = 0;
   private missingAt: number | null = null;
+  private pointMissingAt: number | null = null;
   private lastAt = -Infinity;
   private lastFailure = '';
 
@@ -49,13 +50,23 @@ export class TargetSelectionController {
     if (!input.active) { this.reset(); return; }
     if (!input.hasHand) {
       this.missingAt ??= input.timestamp;
-      this.pinch.reset();
+      this.pinch.reset(true);
       this.candidate = null; this.samples = 0;
       if (input.timestamp - this.missingAt > input.graceMs) this.clearTarget();
       this.failure = 'HAND_LOST'; this.emitFailure(input); return;
     }
     this.missingAt = null;
+    if (!input.pointing || input.sector === null) this.pointMissingAt ??= input.timestamp;
+    if (this.armedSector === null && this.pointMissingAt !== null && input.timestamp - this.pointMissingAt > 150) {
+      if (this.candidate !== null && this.previewSector !== null) this.emit(input, 'FOCUS_TIMEOUT');
+      this.candidate = null; this.samples = 0;
+      if (this.stage !== 'LOCKED') {
+        this.previewSector = null; this.stage = 'NONE';
+        this.failure = input.pointing ? 'RAY_MISS' : 'POINT_NOT_CONFIRMED';
+      }
+    }
     if (input.pointing && input.sector !== null) {
+      this.pointMissingAt = null;
       if (this.candidate !== input.sector) {
         if (this.candidate !== null && this.focusedSector !== this.candidate) this.emit(input, 'SECTOR_UNSTABLE');
         this.candidate = input.sector; this.candidateAt = input.timestamp; this.samples = 0;
@@ -74,7 +85,7 @@ export class TargetSelectionController {
         if (input.timestamp - this.candidateAt >= this.focusDwellMs) {
           if (this.armedSector !== input.sector) {
             this.focusedSector = input.sector; this.armedSector = input.sector;
-            this.pinch.reset(); this.stage = 'TARGET_FOCUSED';
+            this.pinch.reset(true); this.stage = 'TARGET_FOCUSED';
             this.emit(input, 'TARGET_FOCUSED', input.timestamp - this.candidateAt);
             this.emit(input, 'TARGET_ARMED');
           }
@@ -82,13 +93,8 @@ export class TargetSelectionController {
           this.stage = 'TARGET_ARMED';
         }
       }
-    } else {
-      if (this.candidate !== null && this.armedSector === null && this.previewSector !== null) this.emit(input, 'FOCUS_TIMEOUT');
+    } else if (this.armedSector !== null) {
       this.candidate = null; this.samples = 0;
-      if (this.armedSector === null && this.stage !== 'LOCKED') {
-        this.previewSector = null; this.stage = 'NONE';
-        this.failure = input.pointing ? 'RAY_MISS' : 'POINT_NOT_CONFIRMED';
-      }
     }
     this.pinch.update(input.pinchDistance, input.timestamp, this.armedSector !== null);
     if (this.pinch.downEdge) { this.stage = 'LOCK_CANDIDATE'; this.emit(input, 'PINCH_DOWN_EDGE'); this.emit(input, 'LOCK_ATTEMPT'); }
@@ -122,7 +128,7 @@ export class TargetSelectionController {
   }
   clearTarget() {
     this.armedSector = null; this.focusedSector = null; this.previewSector = null;
-    this.candidate = null; this.samples = 0; this.pinch.reset(); this.stage = 'NONE';
+    this.candidate = null; this.samples = 0; this.pointMissingAt = null; this.pinch.reset(); this.stage = 'NONE';
   }
   reset() { this.clearTarget(); this.lockedSector = null; this.missingAt = null; this.lastAt = -Infinity; this.lastFailure = ''; this.events.length = 0; }
 }

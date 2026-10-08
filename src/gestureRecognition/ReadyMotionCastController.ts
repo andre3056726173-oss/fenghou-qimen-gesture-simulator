@@ -39,7 +39,7 @@ export class ReadyMotionCastController {
     this.castGate = false;
     if (!s.handCount || !s.palmCenter) { this.disarm('HAND_LOST'); this.releaseSince = null; return blocked; }
     if (!input.freshSample || now <= this.lastTimestamp) { this.failure = 'STALE_SAMPLE'; return blocked; }
-    const continuous = this.lastTimestamp !== -Infinity && now - this.lastTimestamp <= 120;
+    const continuous = this.lastTimestamp !== -Infinity && now - this.lastTimestamp <= 250;
     this.lastTimestamp = now;
     if (this.state === 'COOLDOWN' || input.stage === 'CASTING' || input.stage === 'COOLDOWN') {
       this.state = 'COOLDOWN'; this.failure = 'CAST_COOLDOWN'; return blocked;
@@ -74,7 +74,7 @@ export class ReadyMotionCastController {
     if (this.state === 'CANDIDATE') {
       const prior = this.candidate!;
       const sameDirection = this.kind === 'PUSH' || Math.sign(m.swipe.horizontal) === Math.sign(prior.swipe.horizontal);
-      if (valid && sameDirection && now - prior.timestamp <= 120) {
+      if (valid && sameDirection && now - prior.timestamp <= 250) {
         this.state = 'CONFIRMED'; this.castGate = true; this.failure = 'NONE';
         return { ...m, action: prior.action, timestamp: prior.timestamp, direction: prior.direction, intensity: prior.intensity };
       }

@@ -37,7 +37,7 @@ export class HandSwipeDetector {
       this.reset(); this.armedAfter = end.timestamp;
       return emptySwipe('NOT_OPEN_PALM');
     }
-    if (previous && end.timestamp - previous.timestamp > 120) {
+    if (previous && end.timestamp - previous.timestamp > 250) {
       this.reset(); this.armedAfter = end.timestamp;
       return emptySwipe('HAND_LOST');
     }
@@ -62,7 +62,7 @@ export class HandSwipeDetector {
     let horizontalPath = 0, verticalPath = 0, path = 0;
     for (let i = startIndex + 1; i < history.length; i++) {
       const a = history[i - 1], b = history[i];
-      if (b.timestamp - a.timestamp > 120) return emptySwipe('HAND_LOST');
+      if (b.timestamp - a.timestamp > 250) return emptySwipe('HAND_LOST');
       const x = b.position.x - a.position.x, y = b.position.y - a.position.y;
       horizontalPath += Math.abs(x); verticalPath += Math.abs(y); path += Math.hypot(x, y);
     }
