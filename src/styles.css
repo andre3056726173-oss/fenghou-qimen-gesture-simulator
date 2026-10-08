@@ -31,8 +31,8 @@ button { font: inherit; }
   filter: grayscale(.18) contrast(1.08) brightness(.78) hue-rotate(12deg);
   transition: opacity 1.4s ease;
 }
-.experience-active .camera-feed { opacity: .72; }
-.debug-active .camera-feed { opacity: .28; }
+.experience-active .camera-feed,
+.experience-active.debug-active .camera-feed { opacity: 1; filter: none; }
 .debug-canvas { z-index: 4; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
 .debug-canvas.active { opacity: 1; }
 
@@ -69,6 +69,10 @@ button { font: inherit; }
   background-image: repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(105, 245, 217, .08) 4px);
   mix-blend-mode: screen;
 }
+
+/* Keep the live person and hands readable underneath the transparent formation. */
+body.experience-active:not(.demo-mode):not(.showcase-dark) .vignette { opacity: .1; }
+body.experience-active:not(.demo-mode):not(.showcase-dark) .scanlines { display: none; }
 
 .brand { position: fixed; z-index: 6; left: 32px; top: 26px; display: flex; align-items: center; gap: 13px; opacity: .82; }
 .brand-seal {
@@ -267,7 +271,7 @@ body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready {
 }
 body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready strong { font-size: 19px; }
 body.spells-qa-mode .camera-feed,
-body.spells-qa-mode.debug-active .camera-feed { opacity: .72; }
+body.spells-qa-mode.debug-active .camera-feed { opacity: 1; filter: none; }
 body.spells-qa-mode #debug-canvas,
 body.spells-qa-mode .debug-panel { display: none; }
 body.spells-qa-mode.spells-qa-detail #debug-canvas { display: block; }
