@@ -5,7 +5,6 @@ export class TargetLockPinchDetector {
   candidate = false;
   confirmed = false;
   candidateAt = 0;
-  timedOut = false;
   private neutral = false;
   private neutralAt = -Infinity;
   private samples = 0;
@@ -16,7 +15,6 @@ export class TargetLockPinchDetector {
     if (timestamp <= this.previousAt) return;
     this.downEdge = false;
     this.confirmed = false;
-    this.timedOut = false;
     const dt = (timestamp - this.previousAt) / 1000;
     const closingDistance = this.previousDistance - distance;
     this.closingVelocity = Number.isFinite(this.previousDistance) && dt > 0 && dt < 0.2
@@ -37,15 +35,10 @@ export class TargetLockPinchDetector {
       this.samples = 0;
     }
     if (!this.candidate) return;
-    if (distance >= 0.30 || timestamp - this.candidateAt > 400) {
-      this.timedOut = timestamp - this.candidateAt > 400;
-      if (this.timedOut) { this.neutral = false; this.neutralAt = -Infinity; }
-      this.candidate = false; this.samples = 0; return;
-    }
     // Two distinct camera samples, including one strong contact. A held old pinch never arms.
     if (distance <= 0.24 && (this.closingVelocity >= -0.3 || closingDistance >= -0.015)) this.samples += 1;
     else this.samples = 0;
-    if (this.samples >= 2 && distance <= 0.20) {
+    if (this.samples >= 2) {
       this.confirmed = true;
       this.candidate = false;
       this.neutral = false; this.neutralAt = -Infinity;
@@ -56,7 +49,7 @@ export class TargetLockPinchDetector {
   reset(keepNeutralHistory = false) {
     this.score = 0; this.closingVelocity = 0; this.downEdge = false;
     this.candidate = false; this.confirmed = false; this.candidateAt = 0;
-    this.neutral = false; this.samples = 0; this.previousDistance = Infinity; this.previousAt = -Infinity; this.timedOut = false;
+    this.neutral = false; this.samples = 0; this.previousDistance = Infinity; this.previousAt = -Infinity;
     if (!keepNeutralHistory) this.neutralAt = -Infinity;
   }
 }

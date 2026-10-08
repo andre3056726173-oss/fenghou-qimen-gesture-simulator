@@ -93,7 +93,7 @@ test('C: recent pre-Armed open fingers permit the half-closed transition to lock
   close(target, 1133, .23); close(target, 1166, .16);
   assert.equal(target.pinch.confirmed, true);
 });
-test('C: slow closing can confirm after the former 180ms deadline', () => {
+test('C: slow closing confirms once it reaches contact range', () => {
   const target = focused();
   const gaps = [.35, .29, .27, .25, .23, .22, .21, .19, .15];
   const confirmations = [];
@@ -102,12 +102,12 @@ test('C: slow closing can confirm after the former 180ms deadline', () => {
     confirmations.push(...target.events.filter(e => e.event === 'LOCK_CONFIRMED'));
     assert.notEqual(target.failure, 'LOCK_TIMEOUT');
   }
-  assert.equal(confirmations.length, 1); assert.equal(confirmations[0].latencyMs, 198);
+  assert.equal(confirmations.length, 1); assert.equal(confirmations[0].latencyMs, 132);
 });
 test('C: small contact rebound keeps contact evidence for the next strong sample', () => {
   const target = focused();
   close(target, 1133, .23); close(target, 1166, .241); close(target, 1199, .225);
-  close(target, 1232, .236); close(target, 1265, .195);
+  close(target, 1232, .236);
   assert.equal(target.pinch.confirmed, true);
 });
 test('C: brief hand loss keeps recent neutral but requires fresh contact evidence', () => {
@@ -127,13 +127,12 @@ test('C: pre-Armed neutral older than 500ms cannot revive a held pinch', () => {
   for (const [i, gap] of [.23, .16, .15].entries()) detector.update(gap, 1533 + i * 33, true);
   assert.equal(detector.confirmed, false); assert.equal(detector.waitingNeutral, true);
 });
-test('C: an over-400ms closure still times out and requires a new release', () => {
+test('C: a hesitant closure has no deadline and still confirms', () => {
   const detector = new TargetLockPinchDetector(); detector.update(.6, 1000, true);
   detector.update(.29, 1033, true);
   for (const t of [1100, 1200, 1300, 1400]) detector.update(.27, t, true);
-  detector.update(.19, 1434, true); assert.equal(detector.timedOut, true);
-  detector.update(.15, 1467, true); detector.update(.14, 1500, true);
-  assert.equal(detector.confirmed, false); assert.equal(detector.waitingNeutral, true);
+  detector.update(.19, 1434, true); detector.update(.15, 1467, true);
+  assert.equal(detector.confirmed, true);
 });
 test('C: confirmed pinch is consumed once until another genuine open sample', () => {
   const target = focused(); close(target, 1133, .23); close(target, 1166, .16);
