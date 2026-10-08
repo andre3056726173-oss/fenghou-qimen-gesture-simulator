@@ -50,7 +50,7 @@
 
 ## 四、残留代码
 
-- `SectorFocusController.ts`：已没有任何地方调用，被 `TargetSelectionController` 取代。
+- `SectorFocusController.ts`：运行时已不调用（被 `TargetSelectionController` 取代），只剩两个测试文件还引用它。
 - `GestureInputBuffer`：每帧写入，但只在调试面板显示，面板上标着 `cast caching OFF`（`main.ts:691`）。
 - `main.ts` 约 800 行，坤／震／坎／巽各自的 QA 追踪代码和正式逻辑混在一起。
 
