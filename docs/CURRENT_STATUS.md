@@ -1,5 +1,7 @@
 # 当前状态与证据 · 2026-10-08
 
+> 发布状态更新：负责人确认后，[PR #2](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/pull/2) 已以普通 merge 合入 `main`，合并提交为 `68930ad95ee97b51ef897af8cce0ec69c8ffc9d4`。下文 Git 状态保留为交接发布时的历史快照；当前 `main` 已包含这些源码和文档，真人验收边界没有因此改变。
+
 本报告基于代码、Git 历史和本轮验证。设计目标见 [PROJECT_VISION.md](PROJECT_VISION.md)。**自动化通过不等于真人锁宫或施法达到目标成功率。**
 
 ## 交接版本与历史

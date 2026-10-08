@@ -1,6 +1,6 @@
 # Fenghou Qimen Gesture Simulator · 风后奇门手势交互模拟器
 
-> **最新成果交接（2026-10-08）**：这是实验性开发版本。请使用 [`handoff/current-progress-2026-10-08`](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/tree/handoff/current-progress-2026-10-08)，包含四术整合、Target/Focus/Armed/Pinch Lock 后续修复及摄像头预览亮度修复。默认 `main`（`e1084b3`）落后于该交接分支；交接分支尚未合并到 `main`。自动测试通过不代表真人锁宫与施法成功率已经达标。
+> **最新成果交接（2026-10-08）**：这是实验性开发版本。四术整合、Target/Focus/Armed/Pinch Lock 后续修复及摄像头预览亮度修复已通过 [PR #2](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/pull/2) 合入 `main`，默认 Clone 即可获得最新成果。[`handoff/current-progress-2026-10-08`](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/tree/handoff/current-progress-2026-10-08) 保留为固定交接快照。自动测试通过不代表真人锁宫与施法成功率已经达标。
 >
 > [项目愿景](docs/PROJECT_VISION.md) · [真实现状与验证边界](docs/CURRENT_STATUS.md) · [朋友接手指南](docs/COLLABORATOR_HANDOFF.md)
 
@@ -22,13 +22,13 @@ A real-time gesture-controlled Qimen formation experiment built with MediaPipe, 
 需要 Node.js `^20.19.0` 或 `>=22.12.0`。
 
 ```bash
-git clone --branch handoff/current-progress-2026-10-08 https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
+git clone https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
 cd fenghou-qimen-gesture-simulator
 npm install
 npm run dev
 ```
 
-已有 Clone 的开发者可先保存自己的改动，再运行 `git fetch origin`、`git switch --track origin/handoff/current-progress-2026-10-08`；如果本地已有该分支，只需 `git switch handoff/current-progress-2026-10-08` 并核对提交。复现锁文件安装可用 `npm ci` 替代 `npm install`。
+已有 Clone 的开发者可先保存自己的改动，再运行 `git fetch origin`、`git switch main`、`git merge --ff-only origin/main`；如出现分叉，请先比较自己的提交，不要 reset 覆盖。需要固定交接快照时使用 `git clone --branch handoff/current-progress-2026-10-08`。复现锁文件安装可用 `npm ci` 替代 `npm install`。
 
 打开终端里显示的地址（默认 `http://localhost:5173`），允许浏览器使用摄像头。推荐 Chrome 或 Edge。
 

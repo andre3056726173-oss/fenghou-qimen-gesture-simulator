@@ -1,5 +1,7 @@
 # 协作者交接 · 2026-10-08
 
+> 发布状态更新：[PR #2](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/pull/2) 已在负责人确认后合入 `main`（merge commit `68930ad95ee97b51ef897af8cce0ec69c8ffc9d4`）。新开发者直接 Clone 默认 `main` 即可；下面的分支命令仍可复现固定交接快照。
+
 这是给首次 Clone 本项目、具备 TypeScript 基础的开发者的接手指南。先读 [项目愿景](PROJECT_VISION.md) 和 [真实现状](CURRENT_STATUS.md)：目标是通过普通 RGB 摄像头和双手操纵身前悬浮的奇门阵局，完成召阵、拨盘、指宫、捏合锁宫、READY、四术及收阵。当前为实验版本，真人交互可靠性仍需验收。
 
 ## 领取正确版本
@@ -139,7 +141,7 @@ git commit -m "fix: describe your change"
 git push -u origin fix/your-task
 ```
 
-没有仓库写权限的朋友先 Fork，在自己的 Fork 中提交分支。PR 的 base 选择本次交接分支，便于在最新代码上协作；正式进入 main 的整合需项目负责人批准。本次交接到 main 的 PR 只能保持 Draft，不自动 Merge。
+没有仓库写权限的朋友先 Fork，在自己的 Fork 中提交分支。后续 PR 的 base 选择 `main`，正式整合需项目负责人批准。固定交接分支保留历史快照；本次交接 PR 最初为 Draft，现已根据负责人的明确确认完成合并。
 
 遵循 [CONTRIBUTING.md](../CONTRIBUTING.md) 和 [ASSETS_LICENSES.md](../ASSETS_LICENSES.md)。不提交 `.env`、secret、个人路径、原始 QA、真人录像、缓存、dist、node_modules 或授权不明素材。
 
