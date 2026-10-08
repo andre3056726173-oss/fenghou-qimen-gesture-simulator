@@ -31,7 +31,7 @@ export class TargetSelectionController {
   private lastFailure = '';
 
   constructor(options: { armedWindowMs?: number } = {}) {
-    this.armedWindowMs = Math.max(600, Math.min(800, options.armedWindowMs ?? 700));
+    this.armedWindowMs = Math.max(600, Math.min(2000, options.armedWindowMs ?? 1500));
   }
 
   update(input: TargetSample) {
@@ -83,7 +83,7 @@ export class TargetSelectionController {
           this.emit(input, 'FOCUS_ATTEMPT');
         }
         if (input.timestamp - this.candidateAt >= this.focusDwellMs) {
-          if (this.armedSector !== input.sector) {
+          if (this.armedSector !== input.sector && (this.armedSector === null || this.pinch.closingVelocity <= 0)) {
             this.focusedSector = input.sector; this.armedSector = input.sector;
             this.pinch.reset(true); this.stage = 'TARGET_FOCUSED';
             this.emit(input, 'TARGET_FOCUSED', input.timestamp - this.candidateAt);
@@ -102,7 +102,6 @@ export class TargetSelectionController {
     else if (this.armedSector !== null) this.stage = 'TARGET_ARMED';
     if (this.pinch.confirmed) this.emit(input, 'LOCK_CONFIRMED', input.timestamp - this.pinch.candidateAt);
     if (this.armedSector !== null) this.failure = this.pinch.waitingNeutral ? 'PINCH_ALREADY_ACTIVE' : this.pinch.candidate ? 'PINCH_NOT_CONFIRMED' : '—';
-    if (this.pinch.timedOut) this.failure = 'LOCK_TIMEOUT';
     this.emitFailure(input);
   }
 

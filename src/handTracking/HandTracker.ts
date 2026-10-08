@@ -17,6 +17,7 @@ export class HandTracker {
   private lastFrame: TrackingFrame | null = null;
   status: TrackerStatus = 'idle';
   private lifecycle = 0;
+  private inferenceErrors = 0;
 
   constructor(video: HTMLVideoElement) { this.video = video; }
 
@@ -84,11 +85,16 @@ export class HandTracker {
     let result;
     try { result = this.detector.detectForVideo(this.video, timestamp) as any; }
     catch (error) {
-      this.status = 'error';
+      // One bad frame skips; only a persistent failure stops tracking.
+      this.inferenceErrors += 1;
       this.lastFrame = null;
-      console.warn('Hand tracking stopped after an inference error', error);
+      if (this.inferenceErrors >= 30) {
+        this.status = 'error';
+        console.warn('Hand tracking stopped after repeated inference errors', error);
+      }
       return { hands: [], timestamp, fps: 0 };
     }
+    this.inferenceErrors = 0;
     const handedness = result.handedness ?? result.handednesses ?? [];
     const hands: TrackedHand[] = (result.landmarks ?? []).map((landmarks: any[], index: number) => ({
       landmarks: landmarks.map((point) => ({ x: point.x, y: point.y, z: point.z, visibility: point.visibility })),

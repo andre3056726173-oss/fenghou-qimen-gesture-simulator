@@ -61,9 +61,9 @@ test('point disappears while index bends: armed target remains and new pinch loc
   c.confirmLock(1199, 0.2); assert.equal(c.stage, 'LOCKED'); assert.equal(c.lockedSector, 1);
   assert.equal(c.armedSector, null);
 });
-test('armed window expires after 700ms and cannot lock', () => {
-  const c = focused(); c.update(sample(1801, { pointing: false, sector: null }));
-  assert.equal(c.armedSector, null); pinch(c, 1834); assert.equal(c.pinch.confirmed, false);
+test('armed window expires after 1500ms and cannot lock', () => {
+  const c = focused(); c.update(sample(2601, { pointing: false, sector: null }));
+  assert.equal(c.armedSector, null); pinch(c, 2634); assert.equal(c.pinch.confirmed, false);
 });
 test('pinch already active before focus cannot pass through; release and a new edge required', () => {
   const c = focused(0.16); pinch(c); assert.equal(c.pinch.confirmed, false);
