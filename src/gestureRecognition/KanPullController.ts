@@ -87,7 +87,7 @@ export class KanPullController {
     }
     if (!input.freshSample || now <= this.lastTimestamp) { this.status.failure = 'STALE_SAMPLE'; return blocked(); }
     this.status.freshSample = true;
-    const continuous = this.lastTimestamp !== -Infinity && now - this.lastTimestamp <= 120;
+    const continuous = this.lastTimestamp !== -Infinity && now - this.lastTimestamp <= 250;
     this.lastTimestamp = now;
     this.status.depthVelocity = m.depthVelocity; this.status.scaleRate = m.scaleRate;
     this.status.pullEvidence = m.pullEvidence; this.status.pullScore = m.pullScore;
@@ -149,7 +149,7 @@ export class KanPullController {
       Math.abs(angleDelta) < 0.12 && aspectStable;
     const evidence = m.pullEvidence >= input.pullThreshold && m.pullZEvidence + m.pullScaleEvidence > 0;
     if (this.status.kanPullState === 'PULL_CANDIDATE') {
-      if (directionValid && evidence && now > this.candidateAt && now - this.candidateAt <= 120) {
+      if (directionValid && evidence && now > this.candidateAt && now - this.candidateAt <= 250) {
         this.status.kanPullState = 'PULL_CONFIRMED'; this.status.failure = 'NONE'; this.status.castGate = true;
         return { ...m, action: 'PULL', timestamp: this.candidateAt };
       }

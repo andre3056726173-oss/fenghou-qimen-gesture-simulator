@@ -56,6 +56,16 @@ function harness(ready = true) {
   return { gate, detector, spell, step, neutral, pull, get now() { return now; }, get pose() { return pose; }, get casts() { return casts; } };
 }
 
+test('15fps skipped samples preserve KAN neutral and allow next-sample PULL confirmation', () => {
+  const h = harness();
+  for (let i = 0; i < 5; i++) h.step({}, { dt: 1000 / 15 });
+  h.step({}, { dt: 2000 / 15 }); assert.equal(h.gate.status.kanPullState, 'READY_FOR_PULL');
+  h.step({ scale: h.pose.scale - .02 }, { dt: 1000 / 15 });
+  assert.equal(h.gate.status.kanPullState, 'PULL_CANDIDATE');
+  h.step({ scale: h.pose.scale - .04 }, { dt: 2000 / 15 });
+  assert.equal(h.casts, 1);
+});
+
 test('POINT KAN + PINCH only locks; subsequent natural return before READY cannot cast', () => {
   const machine = new GestureStateMachine(), priority = new GesturePriorityResolver(), h = harness(false);
   machine.state = 'POINTING';

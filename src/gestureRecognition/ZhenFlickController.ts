@@ -114,7 +114,7 @@ export class ZhenFlickController {
     const old = this.previous;
     this.previous = sample;
     const dt = old ? (now - old.timestamp) / 1000 : 0;
-    const continuous = old !== null && dt > 0 && dt <= 0.12;
+    const continuous = old !== null && dt > 0 && dt <= 0.25;
     if (!continuous) this.waitRelease(old ? 'HAND_LOST' : 'NO_NEW_PINCH');
     const tipSpeed = (a: Landmark, b: Landmark) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) / dt;
     this.status.separationVelocity = continuous ? (sample.gap - old!.gap) / dt : 0;
@@ -145,7 +145,7 @@ export class ZhenFlickController {
     // A pinch already present across the READY boundary is never a cast pinch.
     if (enteringReady && sample.pinch && !this.status.pinchEnter) this.waitRelease('NO_NEW_PINCH');
     if (this.status.stage === 'RELEASE_CANDIDATE') {
-      if (!sample.pinch && sample.gap > 0.25 && continuous && now - this.candidateAt <= 120) {
+      if (!sample.pinch && sample.gap > 0.25 && continuous && now - this.candidateAt <= 250) {
         this.status.stage = 'FLICK_CONFIRMED'; this.status.failure = 'NONE';
         this.status.castGate = true; this.status.score = this.candidateScore;
         return { ...blocked, action: 'FLICK', timestamp: this.candidateAt, flickScore: this.candidateScore,

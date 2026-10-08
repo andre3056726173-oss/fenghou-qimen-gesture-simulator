@@ -86,6 +86,7 @@ export class GestureMotionDetector {
     // Independent evidence: a noisy depth signal must not erase a valid XUN swipe.
     const swipe = this.swipeDetector.update(this.history, params.swipeThreshold);
     const scaleRate = previous ? (snapshot.handScale - previous.handScale) / dt : 0;
+    const depthSpeed = Math.max(speed, Math.abs(scaleRate));
     // Webcams give noisy Z. A forward/back gesture uses Z, apparent palm size, wrist speed and facing together.
     const forwardEvidence = Math.max(0, -velocity.z / 0.3) * params.pushZWeight + Math.max(0, scaleRate / 0.22) * params.pushScaleWeight + (snapshot.palmFacingCamera ? params.pushFacingWeight : 0);
     const pullZEvidence = Math.max(0, velocity.z / 0.3) * params.pullZWeight;
@@ -101,9 +102,9 @@ export class GestureMotionDetector {
     if (flick) {
       action = 'FLICK';
       this.lastFlickAt = timestamp;
-    } else if (forwardEvidence >= params.pushThreshold && speed > 0.14) {
+    } else if (forwardEvidence >= params.pushThreshold && depthSpeed > 0.14) {
       action = 'PUSH';
-    } else if (pullEvidence >= params.pullThreshold && speed > 0.14) {
+    } else if (pullEvidence >= params.pullThreshold && depthSpeed > 0.14) {
       action = 'PULL';
     } else action = swipe.action;
     if (!action && stableMs >= params.holdMs) action = 'HOLD';

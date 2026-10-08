@@ -49,7 +49,9 @@ function palmFacingCamera(points: Landmark[]) {
   const b = points[17];
   const wrist = points[0];
   const area = (a.x - wrist.x) * (b.y - wrist.y) - (a.y - wrist.y) * (b.x - wrist.x);
-  return Math.abs(area) > 0.008;
+  const scale = Math.max(distance(wrist, points[9]), 0.035);
+  // Scale-free area; 0.55 matches the old 0.008 cutoff at a typical 0.12 palm.
+  return Math.abs(area) / (scale * scale) > 0.55;
 }
 
 function normalizedPinch(hand: TrackedHand) {
