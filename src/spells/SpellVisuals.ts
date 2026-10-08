@@ -177,15 +177,17 @@ export class SpellVisuals {
 
   private castWind(spell: SpellId, target: THREE.Vector3, intensity: number, direction: { x: number; y: number; z: number }) {
     const visual = SPELL_VISUALS[spell];
+    const sign = direction.x < 0 ? -1 : 1;
     for (let i = 0; i < Math.max(1, Math.round(visual.windRibbonCount * this.detailMultiplier)); i += 1) {
       const side = i % 2 ? 1 : -1;
-      const flow = new THREE.Vector3(direction.x, direction.y, direction.z).multiplyScalar(0.5 * intensity);
-      const points = [target.clone().add(new THREE.Vector3(-side * 0.9, 0, -0.3)), target.clone().add(new THREE.Vector3(-side * 0.25, 0.15, 0.25)).add(flow), target.clone().add(new THREE.Vector3(side * 0.9, 0.08, 0.5)).addScaledVector(flow, 1.8)];
+      // Every ribbon originates in XUN and travels in the accepted screen direction.
+      const points = [target.clone(), target.clone().add(new THREE.Vector3(sign * .7 * intensity, side * .15, .25)),
+        target.clone().add(new THREE.Vector3(sign * 1.8 * intensity, side * .08, .5))];
       const curve = new THREE.CatmullRomCurve3(points);
       const poolKey = `${spell}:ribbon`;
       const ribbon = this.line(poolKey, spell, curve.getPoints(Math.round(20 * this.detailMultiplier)), visual.baseOpacity);
       this.group.add(ribbon);
-      this.active.push({ object: ribbon, age: i * 0.04, life: visual.windLife, kind: spell, poolKey });
+      this.active.push({ object: ribbon, age: i * 0.04, life: visual.windLife, kind: spell, poolKey, velocity: new THREE.Vector3(sign * .65 * intensity, 0, 0) });
     }
   }
 

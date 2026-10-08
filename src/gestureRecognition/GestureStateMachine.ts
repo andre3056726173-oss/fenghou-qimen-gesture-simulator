@@ -7,6 +7,8 @@ export interface InteractionAdmission {
   space: boolean;
   suppressFistCollapse: boolean;
   lockSector?: boolean;
+  targetArmed?: boolean;
+  lockConfirmed?: boolean;
 }
 
 export type GestureEvent =
@@ -53,7 +55,7 @@ export class GestureStateMachine {
     if (formationPhase === 'COLLAPSING') return this.interrupt('COLLAPSING');
     if (formationPhase === 'IDLE' && this.state !== 'IDLE' && this.state !== 'SUMMONING') return this.interrupt('IDLE');
     if (input.fist && !admission.suppressFistCollapse && this.state !== 'IDLE' && this.state !== 'COLLAPSING') return [...this.interrupt('COLLAPSING'), { type: 'COLLAPSE' }];
-    if ((!admission.manipulation || admission.suppressFistCollapse) && formationPhase === 'ACTIVE') return this.interrupt('ACTIVE');
+    if ((!admission.manipulation || admission.suppressFistCollapse && !admission.lockConfirmed) && formationPhase === 'ACTIVE') return this.interrupt('ACTIVE');
     if (!admission.space && this.state === 'GRAB_SPACE') return this.interrupt('ACTIVE');
 
     if (this.state === 'IDLE') {
@@ -76,7 +78,7 @@ export class GestureStateMachine {
       return events;
     }
 
-    if (input.fist && this.state !== 'COLLAPSING') {
+    if (input.fist && !admission.suppressFistCollapse && this.state !== 'COLLAPSING') {
       this.state = 'COLLAPSING';
       this.lockArmed = false;
       events.push({ type: 'COLLAPSE' });
@@ -88,12 +90,20 @@ export class GestureStateMachine {
       return events;
     }
 
+    if (admission.lockConfirmed && admission.lockSector && this.state !== 'LOCKING') {
+      const interrupted = this.interrupt('LOCKING');
+      this.lockArmed = true;
+      return [...interrupted, { type: 'LOCK', snapshot: input }];
+    }
+    // A pending target owns this pinch cycle, even before global PINCH is stable.
+    if (admission.targetArmed && !input.pointing) return this.interrupt('ACTIVE');
+
     if (admission.space && input.twoHandsOpen && Math.abs(raw.scaleVelocity) > 0.04) {
       events.push({ type: 'SCALE', distance: input.handDistance });
     }
 
     if (this.state === 'LOCKING') {
-      if (!input.pinch) {
+      if (!input.pinch && input.raw.normalizedPinchDistance > 0.30) {
         this.lockArmed = false;
         this.state = input.pointing ? 'POINTING' : 'ACTIVE';
       }

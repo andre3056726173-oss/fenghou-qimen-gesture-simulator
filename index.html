@@ -13,6 +13,20 @@
       <video id="camera" class="camera-feed" playsinline muted></video>
       <div id="scene-root" aria-label="风后奇门三维阵盘"></div>
       <canvas id="debug-canvas" class="debug-canvas"></canvas>
+      <section id="spell-guide" class="spell-guide" aria-live="polite" aria-atomic="true">
+        <p id="spell-guide-title">施法状态</p>
+        <strong id="spell-guide-action">等待摄像头</strong>
+        <small id="spell-guide-detail">开启摄像头后张开手掌召阵</small>
+      </section>
+      <section id="build-fingerprint" class="build-fingerprint" aria-label="当前构建版本">
+        <span>BUILD</span><strong id="build-branch">DEV UNKNOWN</strong><small id="build-commit">DEV UNKNOWN</small>
+        <em id="target-qa-warning" hidden>TARGET LOCK QA NOT ACTIVE</em>
+      </section>
+      <section id="lock-status" class="lock-status" aria-live="polite">
+        <div><span>目标宫位</span><strong id="target-palace-status">—</strong></div>
+        <div><span>锁定宫位</span><strong id="locked-palace-status">未锁定</strong></div>
+        <div><span>术式</span><strong id="spell-status">—</strong></div>
+      </section>
       <div class="vignette"></div>
       <div class="scanlines"></div>
 

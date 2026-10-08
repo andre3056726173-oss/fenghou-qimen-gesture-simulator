@@ -12,10 +12,16 @@ import { PerformanceGovernor, type PerformanceTier } from './PerformanceGovernor
 import { HandOcclusionSystem } from './HandOcclusionSystem';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { VISUAL_QUALITY, qualityFromPerformanceTier, type VisualQualityLevel } from './VisualQualityConfig';
-import { landmarkToViewport } from '../handTracking/CameraCoordinates';
+import { fingertipToNdc, landmarkToViewport, screenDirectionToSpell } from '../handTracking/CameraCoordinates';
 import { FORMATION_STYLE, FRONT_FORMATION_CENTER, FRONT_MAX_SPACE_SCALE, FRONT_MIN_SPACE_SCALE } from '../qimen/FormationStyle';
-import { intersectPlateLocal, sectorFromLocalPoint } from '../qimen/FormationPicking';
+import { intersectPlateLocal, sectorFromLocalPoint, sectorPoint } from '../qimen/FormationPicking';
 import { disposeObjectTrees } from './ResourceLifecycle';
+
+export interface FormationAimHit {
+  hit: boolean; sector: number | null; localX: number | null; localY: number | null;
+  localZ: number | null; angle: number | null; reason: string;
+  rawSector?: number; boundaryDistance?: number; aimSpeed?: number;
+}
 
 /** Chest-front floating formation stage. Hand landmarks are projected into this space, never onto a floor. */
 export class QimenScene {
@@ -42,6 +48,13 @@ export class QimenScene {
   private tetherOpacity = 0;
   private tetherTargetOpacity = 0;
   private stablePointingSector: number | null = null;
+  private readonly aimCursor = new THREE.Mesh(new THREE.RingGeometry(0.045, 0.07, 24),
+    new THREE.MeshBasicMaterial({ color: 0xc9efe4, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+  private readonly lockedAim = new THREE.Mesh(new THREE.RingGeometry(0.085, 0.105, 32),
+    new THREE.MeshBasicMaterial({ color: 0xe2c681, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+  private readonly aimDirection = new THREE.Vector3();
+  private aimTimestamp = -Infinity;
+  private lastAimAngle: number | null = null;
   private stableHoveredPlate: number | null = null;
   private hoverCandidate: number | null = null;
   private hoverCandidateSince = 0;
@@ -98,6 +111,11 @@ export class QimenScene {
       this.tetherLines.push(line);
     }
     this.scene.add(this.ground, this.dust, this.formation.group, this.spellSystem.group, this.handOcclusion.group, this.handTrace, this.supportTrace, this.handCore, ...this.tetherLines);
+    this.aimCursor.rotation.x = -Math.PI / 2;
+    this.aimCursor.visible = false;
+    this.lockedAim.rotation.x = -Math.PI / 2;
+    this.lockedAim.visible = false;
+    this.formation.heavenPlate.add(this.aimCursor, this.lockedAim);
 
     this.post = new PostProcessingPipeline(this.renderer, this.scene, this.camera, VISUAL_QUALITY.HIGH);
     this.spellSystem.setVisualQuality(VISUAL_QUALITY.HIGH);
@@ -192,7 +210,7 @@ export class QimenScene {
       castStage: this.spellSystem.stage,
       action: motion.action,
       castIntensity: motion.intensity,
-      castDirection: { x: motion.direction.x, y: -motion.direction.y, z: -motion.direction.z },
+      castDirection: screenDirectionToSpell(motion.direction),
       chargeScale,
       handSnapshot: snapshot,
     };
@@ -245,6 +263,7 @@ export class QimenScene {
 
   updateRotationTether(snapshot: GestureSnapshot, rotating: boolean, plateIndex: number | null = null) {
     this.tetherTargetOpacity = rotating && snapshot.landmarks.length ? 0.35 : 0;
+    this.tetherLines.forEach((line, i) => (line.material as THREE.LineBasicMaterial).color.setHex(i === 1 ? 0xd8b562 : 0x8adbc7));
     if (!snapshot.landmarks.length) return;
     this.formation.group.updateMatrixWorld(true);
     const points = snapshot.landmarks[0];
@@ -261,6 +280,26 @@ export class QimenScene {
       attr.setXYZ(0, source.x, source.y, source.z);
       attr.setXYZ(1, target.x, target.y, target.z);
       attr.needsUpdate = true;
+    }
+  }
+
+  /** Functional armed cue; reuses the three existing tether segments, no new GPU resources. */
+  updateZhenFlickFeedback(snapshot: GestureSnapshot, armed: boolean) {
+    const points = snapshot.landmarks[0];
+    if (!armed || !points || points.length !== 21) return;
+    this.tetherTargetOpacity = 0.45;
+    const thumb = this.spacePoint(points[4].x, points[4].y, points[4].z);
+    const index = this.spacePoint(points[8].x, points[8].y, points[8].z);
+    for (let i = 0; i < 3; i += 1) {
+      const attr = this.tetherLines[i].geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let end = 0; end < 2; end += 1) {
+        const t = (i + end) / 3;
+        attr.setXYZ(end, thumb.x + (index.x - thumb.x) * t,
+          thumb.y + (index.y - thumb.y) * t + Math.sin(t * Math.PI * 3) * 0.018,
+          thumb.z + (index.z - thumb.z) * t);
+      }
+      attr.needsUpdate = true;
+      (this.tetherLines[i].material as THREE.LineBasicMaterial).color.setHex(0xd5eaff);
     }
   }
 
@@ -298,18 +337,37 @@ export class QimenScene {
     }
   }
 
-  pointingHit(snapshot: GestureSnapshot, handSpeed = 0) {
+  pointingHit(snapshot: GestureSnapshot, handSpeed = 0, sampleTimestamp?: number): FormationAimHit {
     if (!snapshot.landmarks.length || !snapshot.pointing) {
       this.stablePointingSector = null;
       return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'NOT_POINTING' };
     }
     const points = snapshot.landmarks[0];
-    const hit = this.rayFromFinger(points);
-    if (!hit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
-    const localHit = this.formation.heavenPlate.worldToLocal(hit.clone());
+    const previousAt = this.aimTimestamp;
+    // FRONT_CIRCLE is an image-space interaction: the visible fingertip, not an
+    // unstable monocular bone-depth extrapolation, owns the cursor and sector.
+    let localHit: THREE.Vector3 | null;
+    if (FORMATION_STYLE === 'FRONT_CIRCLE') {
+      const ndc = fingertipToNdc(points[8].x, points[8].y, window.innerWidth, window.innerHeight);
+      this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
+      localHit = intersectPlateLocal(this.raycaster.ray, this.formation.heavenPlate, 0.117);
+      if (sampleTimestamp !== undefined) this.aimTimestamp = sampleTimestamp;
+    } else {
+      const hit = this.rayFromFinger(points, sampleTimestamp);
+      localHit = hit ? this.formation.heavenPlate.worldToLocal(hit.clone()) : null;
+    }
+    if (!localHit) return { hit: false, sector: null, localX: null, localY: null, localZ: null, angle: null, reason: 'PLANE_MISS' };
     const radius = Math.hypot(localHit.x, localHit.z);
     const angle = Math.atan2(localHit.z, localHit.x);
-    const location = { hit: true, localX: localHit.x, localY: localHit.y, localZ: localHit.z, angle };
+    const dt = sampleTimestamp === undefined ? 0 : (sampleTimestamp - previousAt) / 1000;
+    const aimSpeed = this.lastAimAngle === null || dt <= 0 || dt > 0.2 ? 0 :
+      Math.abs(Math.atan2(Math.sin(angle - this.lastAimAngle), Math.cos(angle - this.lastAimAngle))) / dt;
+    this.lastAimAngle = angle;
+    const rawSector = sectorFromLocalPoint(localHit.x, localHit.z);
+    const center = Math.PI / 2 - rawSector * Math.PI / 4;
+    const fromCenter = Math.abs(Math.atan2(Math.sin(angle - center), Math.cos(angle - center)));
+    const boundaryDistance = Math.max(0, (Math.PI / 8 - fromCenter) * 180 / Math.PI);
+    const location = { hit: true, localX: localHit.x, localY: localHit.y, localZ: localHit.z, angle, rawSector, boundaryDistance, aimSpeed };
     if (radius < 0.25 || radius > 5.35) return { ...location, sector: null, reason: 'OUTSIDE_FORMATION' };
     const best = sectorFromLocalPoint(localHit.x, localHit.z);
     if (this.stablePointingSector !== null && this.stablePointingSector !== best) {
@@ -320,11 +378,33 @@ export class QimenScene {
       if (difference < Math.PI / 8 + extra) return { ...location, sector: this.stablePointingSector, reason: 'SECTOR_HYSTERESIS' };
     }
     this.stablePointingSector = best;
-    return { ...location, sector: best, reason: 'HIT' };
+    return { ...location, sector: best, reason: FORMATION_STYLE === 'FRONT_CIRCLE' ? 'SCREEN_HIT' : 'HIT' };
   }
 
   pointingSector(snapshot: GestureSnapshot, handSpeed = 0) {
     return this.pointingHit(snapshot, handSpeed).sector;
+  }
+
+  updateAimCursor(hit: FormationAimHit | null, stage: string, pinchScore: number) {
+    this.aimCursor.visible = Boolean(hit?.hit && hit.sector !== null && this.animator.phase === 'ACTIVE');
+    if (!this.aimCursor.visible || !hit) return;
+    this.aimCursor.position.set(hit.localX ?? 0, (hit.localY ?? 0) + 0.012, hit.localZ ?? 0);
+    this.aimCursor.scale.setScalar(stage === 'LOCK_CANDIDATE' ? 1 + pinchScore * 0.6 : stage === 'TARGET_ARMED' ? 1.25 : 1);
+    this.aimCursor.material.opacity = stage === 'TARGET_ARMED' || stage === 'LOCKED' ? 0.9 : 0.55;
+  }
+
+  setLockedAim(sector: number | null, hit: FormationAimHit | null = null) {
+    this.lockedAim.visible = sector !== null;
+    if (sector === null) return;
+    const point = hit?.sector === sector && hit.localX !== null && hit.localZ !== null
+      ? new THREE.Vector3(hit.localX, 0.13, hit.localZ)
+      : sectorPoint(sector, 4.45, 0.13);
+    this.lockedAim.position.copy(point);
+  }
+
+  resetTargetAim() {
+    this.stablePointingSector = null; this.lastAimAngle = null;
+    this.aimTimestamp = -Infinity; this.aimCursor.visible = false;
   }
 
   /** Chooses the plate whose radial band is nearest the hand/finger contact point. */
@@ -384,7 +464,7 @@ export class QimenScene {
     return THREE.MathUtils.clamp(0.62 + (-tip.z) * 0.9, 0.42, 1);
   }
 
-  private rayFromFinger(points: Landmark[]) {
+  private rayFromFinger(points: Landmark[], sampleTimestamp?: number) {
     const mcp = points[5];
     const tip = points[8];
     const mirroredMcp = landmarkToViewport(mcp.x, mcp.y, window.innerWidth, window.innerHeight);
@@ -393,6 +473,12 @@ export class QimenScene {
     const projectedX = THREE.MathUtils.clamp(mirroredTip.x + (mirroredTip.x - mirroredMcp.x) * extension, 0.01, 0.99);
     const projectedY = THREE.MathUtils.clamp(mirroredTip.y + (mirroredTip.y - mirroredMcp.y) * extension, 0.01, 0.99);
     this.raycaster.setFromCamera(new THREE.Vector2(projectedX * 2 - 1, -(projectedY * 2 - 1)), this.camera);
+    if (sampleTimestamp !== undefined && sampleTimestamp > this.aimTimestamp) {
+      if (sampleTimestamp - this.aimTimestamp > 200) this.aimDirection.copy(this.raycaster.ray.direction);
+      else this.aimDirection.lerp(this.raycaster.ray.direction, 0.65).normalize();
+      this.aimTimestamp = sampleTimestamp;
+      this.raycaster.ray.direction.copy(this.aimDirection);
+    }
     const hit = intersectPlateLocal(this.raycaster.ray, this.formation.heavenPlate, 0.117);
     return hit ? this.formation.heavenPlate.localToWorld(hit) : null;
   }

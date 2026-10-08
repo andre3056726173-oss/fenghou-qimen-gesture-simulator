@@ -182,10 +182,11 @@ test('CAST input is rejected before entering rotation or space state; exits rele
   assert.equal(machine.state, 'COLLAPSING');
 });
 
-test('priority contract remains collapse > cast > lock > rotate > target > space', () => {
+test('priority contract: an explicit lock wins over cast; otherwise cast wins manipulation', () => {
   const r = new GesturePriorityResolver();
   const base = { fist: false, spellStage: 'READY', motion: { action: 'PUSH' }, locking: true, rotating: true, pointing: true, spaceGesture: true };
-  assert.equal(r.resolve(base), 'CAST'); assert.equal(r.resolve({ ...base, fist: true }), 'COLLAPSE');
+  assert.equal(r.resolve(base), 'LOCK'); assert.equal(r.resolve({ ...base, locking: false }), 'CAST');
+  assert.equal(r.resolve({ ...base, fist: true }), 'COLLAPSE');
   assert.equal(r.resolve({ ...base, spellStage: 'NONE' }), 'LOCK');
 });
 

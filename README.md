@@ -1,5 +1,9 @@
 # Fenghou Qimen Gesture Simulator · 风后奇门手势交互模拟器
 
+> **最新成果交接（2026-10-08）**：这是实验性开发版本。请使用 [`handoff/current-progress-2026-10-08`](https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator/tree/handoff/current-progress-2026-10-08)，包含四术整合、Target/Focus/Armed/Pinch Lock 后续修复及摄像头预览亮度修复。默认 `main`（`e1084b3`）落后于该交接分支；交接分支尚未合并到 `main`。自动测试通过不代表真人锁宫与施法成功率已经达标。
+>
+> [项目愿景](docs/PROJECT_VISION.md) · [真实现状与验证边界](docs/CURRENT_STATUS.md) · [朋友接手指南](docs/COLLABORATOR_HANDOFF.md)
+
 A real-time gesture-controlled Qimen formation experiment built with MediaPipe, Three.js and WebGL.
 
 对着电脑摄像头比手势，在浏览器里召唤、拨动一个悬浮的奇门阵盘，并按宫位发动四种术式。
@@ -18,11 +22,13 @@ A real-time gesture-controlled Qimen formation experiment built with MediaPipe, 
 需要 Node.js `^20.19.0` 或 `>=22.12.0`。
 
 ```bash
-git clone https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
+git clone --branch handoff/current-progress-2026-10-08 https://github.com/andre3056726173-oss/fenghou-qimen-gesture-simulator.git
 cd fenghou-qimen-gesture-simulator
 npm install
 npm run dev
 ```
+
+已有 Clone 的开发者可先保存自己的改动，再运行 `git fetch origin`、`git switch --track origin/handoff/current-progress-2026-10-08`；如果本地已有该分支，只需 `git switch handoff/current-progress-2026-10-08` 并核对提交。复现锁文件安装可用 `npm ci` 替代 `npm install`。
 
 打开终端里显示的地址（默认 `http://localhost:5173`），允许浏览器使用摄像头。推荐 Chrome 或 Edge。
 
@@ -47,8 +53,9 @@ npm run dev
 |---|---|---|
 | 坤 | 土 | 手掌往前轻推 |
 | 巽 | 风 | 手掌左右横扫 |
-| 震 | 雷 | 捏合保持一下再快速张开手指 |
-| 坎 | 水 | 手掌往身体方向回拉 |
+| 震 | 雷 | 锁宫后先完全松开；READY 后重新捏合、短暂保持，再快速弹开手指 |
+| 坎 | 水 | 锁宫后完全松开，等 READY 并稳定张掌，再朝身体方向轻拉 |
+
 
 每个手势都要保持稳定一小会儿才会被认出来。更细的说明见 [手势文档](docs/GESTURES.md)。
 
@@ -67,6 +74,14 @@ npm run dev
   - `T`：开始/结束最长 60 秒的 QA 记录（JSON）
   - `1`–`4`：模拟施术，只用来看视觉效果，不代表手势能被识别
 - `?qa=kun`：自动打开坤术专用诊断，只显示张掌、指宫、锁宫、蓄势和轻推的关键数值与失败步骤。
+- `?qa=xun`：巽术专用诊断，显示指宫、锁宫、蓄势、横扫轨迹、方向一致性、缓冲和失败原因。
+- `?qa=zhen`：自动打开震术诊断，观察锁宫 PINCH 消费、新 PINCH、指尖分离速度、FLICK 周期状态及失败原因；按 `R` 下载数值记录，不保存视频。
+
+- `?qa=kan`：自动打开坎术诊断，显示锁宫周期消费、READY Neutral、回拉证据分量、Candidate／Confirmed 和失败时间线；按 `R` 保存数值记录，不保存视频。
+- `?qa=spells`：四术整合诊断，显示当前锁宫／术式、四种动作 Score、统一 Cast Gate、Neutral／Armed／Candidate／Confirmed／Cooldown、新摄像头样本、输入缓冲及失败时间线。
+
+四术都只接受 READY 后的新施术动作。锁宫后完全松开；坤／巽／坎先张掌稳定片刻再推／扫／拉，震须重新捏合蓄势再弹开。READY 前动作不再通过输入缓冲延后释放。默认动作阈值未修改。
+
 
 导出的 JSON 不含视频，但可能有设备信息和手部坐标，分享前请检查。
 

@@ -1,5 +1,10 @@
 import type { GestureSnapshot } from '../types';
 import type { MotionState } from './GestureMotionDetector';
+import type { SwipeState } from './HandSwipeDetector';
+import type { ZhenFlickStatus } from './ZhenFlickController';
+
+import type { KanPullStatus } from './KanPullController';
+
 
 export interface GestureRecord {
   timestamp: number;
@@ -13,6 +18,11 @@ export interface GestureRecord {
   spellState: string;
   sector: number | null;
   confidence: number;
+  swipe: SwipeState;
+  zhenFlick?: ZhenFlickStatus;
+
+  kanPull?: KanPullStatus;
+
 }
 
 /** Records numerical landmark/gesture telemetry only — never camera frames. */
@@ -33,7 +43,10 @@ export class GestureDebugRecorder {
     return 'started' as const;
   }
 
-  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number) {
+  record(snapshot: GestureSnapshot, motion: MotionState, spellState: string, sector: number | null, timestamp: number, diagnostic?: ZhenFlickStatus | KanPullStatus, kanPull?: KanPullStatus) {
+    const zhenFlick = diagnostic && 'stage' in diagnostic ? diagnostic : undefined;
+    kanPull ??= diagnostic && 'kanPullState' in diagnostic ? diagnostic : undefined;
+
     if (!this.recording) return;
     if (timestamp - this.startedAt > 10_000) {
       this.recording = false;
@@ -52,6 +65,11 @@ export class GestureDebugRecorder {
       spellState,
       sector,
       confidence: snapshot.confidence,
+      swipe: { ...motion.swipe },
+      zhenFlick: zhenFlick ? { ...zhenFlick } : undefined,
+
+      kanPull: kanPull ? { ...kanPull } : undefined,
+
     });
   }
 

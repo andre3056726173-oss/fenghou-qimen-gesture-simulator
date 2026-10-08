@@ -1,6 +1,13 @@
 import type { GestureTuningValues } from './GestureTuning';
+import type { TargetEvent } from './TargetSelectionController';
 
 export interface SpellQaCounters { attempts: number; success: number; failures: Record<string, number>; }
+
+export function hasTargetQaSchema(report: unknown): boolean {
+  if (!report || typeof report !== 'object') return false;
+  const data = report as Record<string, unknown>;
+  return Boolean(data.targetSelection && typeof data.targetSelection === 'object' && Array.isArray(data.targetTimeline));
+}
 
 export const REAL_QA_CHECKLIST = [
   '光照：明亮 / 普通 / 偏暗 / 背光',
@@ -22,6 +29,30 @@ export class RealInteractionQA {
   private readonly frames: number[] = [];
   private lastTuning: GestureTuningValues | null = null;
   private environment: Record<string, unknown> = {};
+  private readonly targetTimeline: TargetEvent[] = [];
+  private targetSelection = this.emptyTargetStats();
+
+  private emptyTargetStats() {
+    return { previewAttempts: 0, focusAttempts: 0, focusSuccess: 0, focusLatencyMs: [] as number[],
+      armedCount: 0, pinchAttempts: 0, lockAttempts: 0, lockSuccess: 0, lockLatencyMs: [] as number[],
+      failureReasons: {} as Record<string, number> };
+  }
+  targetEvent(event: TargetEvent) {
+    if (!this.session) return;
+    this.targetTimeline.push({ ...event });
+    if (this.targetTimeline.length > 2000) this.targetTimeline.shift();
+    const s = this.targetSelection;
+    if (event.event === 'PREVIEW_ATTEMPT') s.previewAttempts += 1;
+    if (event.event === 'FOCUS_ATTEMPT') s.focusAttempts += 1;
+    if (event.event === 'TARGET_FOCUSED') { s.focusSuccess += 1; s.focusLatencyMs.push(event.latencyMs ?? 0); }
+    if (event.event === 'TARGET_ARMED') s.armedCount += 1;
+    if (event.event === 'PINCH_DOWN_EDGE') s.pinchAttempts += 1;
+    if (event.event === 'LOCK_ATTEMPT') s.lockAttempts += 1;
+    if (event.event === 'LOCK_SUCCESS') { s.lockSuccess += 1; s.lockLatencyMs.push(event.latencyMs ?? 0); }
+    // Pending confirmation belongs in the timeline, not in failed-attempt counts.
+    if (['FOCUS_TIMEOUT', 'FOCUS_EXPIRED', 'ARMED_TARGET_MISSING', 'PINCH_STOLEN_BY_ROTATE', 'TARGET_LOCK_STOLEN_BY_ROTATE', 'LOCK_TIMEOUT', 'HAND_LOST', 'PINCH_ALREADY_ACTIVE', 'SECTOR_UNSTABLE'].includes(event.event))
+      s.failureReasons[event.event] = (s.failureReasons[event.event] ?? 0) + 1;
+  }
 
   setEnabled(value: boolean) { this.enabled = value; }
   toggleSession(timestamp: number, tuning: GestureTuningValues) {
@@ -31,6 +62,7 @@ export class RealInteractionQA {
       this.startedAt = timestamp; this.frames.length = 0; this.latencies.length = 0;
       Object.keys(this.spell).forEach((key) => delete this.spell[key]);
       this.lostHands = 0; this.falsePositive = 0; this.environment = {};
+      this.targetSelection = this.emptyTargetStats(); this.targetTimeline.length = 0;
     }
     else this.download();
     return this.session;
@@ -48,7 +80,7 @@ export class RealInteractionQA {
   snapshot(tuning: GestureTuningValues) {
     const averageFps = this.frames.length ? this.frames.reduce((sum, value) => sum + value, 0) / this.frames.length : 0;
     const averageLatency = this.latencies.length ? this.latencies.reduce((sum, value) => sum + value, 0) / this.latencies.length : 0;
-    return { startedAt: this.startedAt, averageFps, actionSampleToDispatchMs: averageLatency, latencyScope: 'CPU sample-to-dispatch only; not physical hand-to-photon latency', spell: this.spell, lostHands: this.lostHands, labelledFalsePositive: this.falsePositive, falsePositiveCoverage: 'No automatic ground-truth labels', environment: this.environment, tuning };
+    return { startedAt: this.startedAt, averageFps, actionSampleToDispatchMs: averageLatency, latencyScope: 'CPU sample-to-dispatch only; not physical hand-to-photon latency', spell: this.spell, lostHands: this.lostHands, labelledFalsePositive: this.falsePositive, falsePositiveCoverage: 'No automatic ground-truth labels', environment: this.environment, targetSelection: this.targetSelection, targetTimeline: this.targetTimeline, tuning };
   }
   private counter(id: string) { return this.spell[id] ??= { attempts: 0, success: 0, failures: {} }; }
   private download() {

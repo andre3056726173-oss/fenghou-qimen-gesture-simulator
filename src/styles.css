@@ -31,8 +31,8 @@ button { font: inherit; }
   filter: grayscale(.18) contrast(1.08) brightness(.78) hue-rotate(12deg);
   transition: opacity 1.4s ease;
 }
-.experience-active .camera-feed { opacity: .72; }
-.debug-active .camera-feed { opacity: .28; }
+.experience-active .camera-feed,
+.experience-active.debug-active .camera-feed { opacity: 1; filter: none; }
 .debug-canvas { z-index: 4; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
 .debug-canvas.active { opacity: 1; }
 
@@ -69,6 +69,10 @@ button { font: inherit; }
   background-image: repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(105, 245, 217, .08) 4px);
   mix-blend-mode: screen;
 }
+
+/* Keep the live person and hands readable underneath the transparent formation. */
+body.experience-active:not(.demo-mode):not(.showcase-dark) .vignette { opacity: .1; }
+body.experience-active:not(.demo-mode):not(.showcase-dark) .scanlines { display: none; }
 
 .brand { position: fixed; z-index: 6; left: 32px; top: 26px; display: flex; align-items: center; gap: 13px; opacity: .82; }
 .brand-seal {
@@ -248,8 +252,53 @@ body.camera-debug .start-panel,
 body.camera-debug .control-bar { display: none !important; }
 body.camera-debug .camera-debug-panel { display: block; }
 
+/* Compact four-spell test status: keep the formation visible and put only the next action on screen. */
+.spell-guide { display: none; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide {
+  display: block; position: fixed; z-index: 8; top: 18px; right: 18px; width: min(280px, calc(100vw - 36px));
+  padding: 12px 15px; border: 1px solid rgba(185, 160, 103, .24); border-radius: 8px;
+  color: #eee8d5; background: rgba(7, 11, 10, .68); backdrop-filter: blur(8px); pointer-events: none;
+}
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide p { margin: 0 0 5px; color: rgba(222, 204, 159, .68); font-size: 10px; letter-spacing: .12em; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide strong { display: block; color: #eee2be; font-size: 15px; font-weight: 500; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide small { display: block; margin-top: 5px; color: rgba(236, 236, 222, .68); font-size: 11px; line-height: 1.4; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready { border-color: rgba(138, 230, 192, .55); box-shadow: 0 0 22px rgba(94, 200, 157, .14); }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready strong { color: #b7f4cf; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready {
+  top: 18px; right: auto; left: 50%; width: min(440px, calc(100vw - 32px)); padding: 14px 20px;
+  transform: translateX(-50%); text-align: center; border-color: rgba(156, 236, 189, .72);
+  background: rgba(8, 25, 20, .82); box-shadow: 0 5px 30px rgba(91, 225, 159, .18);
+}
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide.is-ready strong { font-size: 19px; }
+body.spells-qa-mode .camera-feed,
+body.spells-qa-mode.debug-active .camera-feed { opacity: 1; filter: none; }
+body.spells-qa-mode #debug-canvas,
+body.spells-qa-mode .debug-panel { display: none; }
+body.spells-qa-mode.spells-qa-detail #debug-canvas { display: block; }
+body.spells-qa-mode.spells-qa-detail .debug-panel { display: block; }
+
 /* In normal use the formation is the subject; telemetry returns with DEBUG / D. */
 body.experience-active:not(.debug-active) .hud-card,
 body.experience-active:not(.debug-active) .selection-panel,
 body.experience-active:not(.debug-active) .control-bar { opacity: 0; visibility: hidden; pointer-events: none; }
 body.experience-active:not(.debug-active) .brand { opacity: .28; transform: scale(.86); transform-origin: left top; }
+
+.build-fingerprint { display: none; position: fixed; z-index: 11; top: 12px; left: 16px; max-width: 300px;
+  padding: 7px 10px; background: rgba(4, 12, 11, .78); border-left: 2px solid rgba(210,170,88,.7);
+  color: #d5e6dd; font: 11px/1.4 ui-monospace, Consolas, monospace; pointer-events: none; }
+.build-fingerprint span, .build-fingerprint strong, .build-fingerprint small, .build-fingerprint em { display: block; font-weight: 400; font-style: normal; overflow-wrap: anywhere; }
+.build-fingerprint span { color: #d2aa58; letter-spacing: .14em; }
+.build-fingerprint em { color: #ff957d; margin-top: 4px; }
+.build-fingerprint em[hidden] { display: none; }
+body.debug-active .build-fingerprint, body:is(.spells-qa-mode, .target-guide-mode).debug-active .build-fingerprint { display: block; }
+.lock-status { position: fixed; z-index: 9; top: 18px; right: 18px; width: min(250px, calc(100vw - 36px));
+  padding: 9px 13px; background: rgba(5, 14, 12, .76); border: 1px solid rgba(160,190,170,.25);
+  border-radius: 6px; backdrop-filter: blur(7px); pointer-events: none; }
+.lock-status div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 5px 0;
+  color: rgba(225,234,220,.68); font-size: 12px; }
+.lock-status strong { color: #e6e4ce; font-weight: 500; text-align: right; }
+.lock-status.is-locked { border-color: rgba(219,190,119,.57); }
+.lock-status.is-locked #locked-palace-status { color: #efd59c; }
+body:is(.spells-qa-mode, .target-guide-mode) .spell-guide:not(.is-ready) { top: 146px; }
+body:is(.demo-mode, .showcase-mode, .camera-debug) .lock-status,
+body:is(.demo-mode, .showcase-mode, .camera-debug) .build-fingerprint { display: none !important; }

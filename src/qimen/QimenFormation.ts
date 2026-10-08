@@ -309,9 +309,11 @@ export class QimenFormation {
   }
 
   preview(sector: number, intensity = 0.65) {
-    this.lockedSector = null;
-    this.select(sector, intensity);
-    this.energyFlow.activate(sector, intensity * 0.42);
+    // A passing aim must not erase an already locked palace or its energy path.
+    if (this.lockedSector === null) {
+      this.select(sector, intensity);
+      this.energyFlow.activate(sector, intensity * 0.42);
+    }
     const label = this.heavenPlate.trigramLabels[sector];
     if (label) {
       label.position.y = 0.1 + intensity * 0.06;
@@ -320,9 +322,10 @@ export class QimenFormation {
   }
 
   focus(sector: number, intensity = 0.88) {
-    this.lockedSector = null;
-    this.select(sector, intensity);
-    this.energyFlow.activate(sector, intensity * 0.72);
+    if (this.lockedSector === null) {
+      this.select(sector, intensity);
+      this.energyFlow.activate(sector, intensity * 0.72);
+    }
     const label = this.heavenPlate.trigramLabels[sector];
     if (label) {
       label.position.y = 0.1 + intensity * 0.1;
