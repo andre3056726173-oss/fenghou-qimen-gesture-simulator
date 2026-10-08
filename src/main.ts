@@ -168,6 +168,8 @@ function emitSpellEvents(events: SpellControllerEvent[]) {
       if (!demoMode && event.stage === 'PREPARING' && event.spell) qa.attempt(event.spell.id);
       if (event.stage === 'PREPARING' && previousSpellStage !== 'PREPARING') audioBus.emit('spell_prepare');
       if (event.stage === 'READY' && previousSpellStage !== 'READY') audioBus.emit('spell_ready');
+      // A finished or cancelled spell releases the palace, so aiming can preview other palaces again.
+      if (event.stage === 'NONE' && previousSpellStage !== 'NONE') qimen.formation.select(null);
       previousSpellStage = event.stage;
       return;
     }
@@ -244,7 +246,8 @@ async function startCamera(preserveDemo = false) {
     if (disposed || requestId !== camera.currentRequest) return;
     camera.release();
     console.error(error);
-    hud.setTrackerStatus(tracker.status, tracker.status === 'denied' ? '权限被拒 · 可用演示' : '模型载入失败 · 可用演示');
+    const denied = tracker.status === 'denied' || (error instanceof DOMException && error.name === 'NotAllowedError');
+    hud.setTrackerStatus(denied ? 'denied' : tracker.status, denied ? '权限被拒 · 可用演示' : '模型载入失败 · 可用演示');
     if (preserveDemo) spellDemoDirector.start();
     else hud.toast('摄像头未启用，可检查设备或权限');
   } finally {
@@ -460,6 +463,8 @@ function handleGestureFrame(snapshot: GestureSnapshot, timestamp: number, sample
       audioBus.emit('formation_collapse');
       selectedSector = null;
       sectorFocus.reset();
+      qimen.resetTargetAim();
+      qimen.spellSystem.visuals.clear();
       cachedFocusState = { sector: null, stage: 'NONE', confidence: 0 };
       cachedRayHit = null;
       qimen.setLockedAim(null);
